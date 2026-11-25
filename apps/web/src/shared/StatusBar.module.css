@@ -1,0 +1,56 @@
+.wrap {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+.bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px;
+  font-size: 0.9rem;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+}
+.dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: currentColor;
+  flex: none;
+}
+.text {
+  flex: 1;
+}
+.code {
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.08em;
+  color: var(--text-dim);
+}
+.ok {
+  color: var(--ok);
+}
+.ok .text,
+.ok .code {
+  color: var(--text);
+}
+.warn {
+  color: var(--warn);
+  background: #2a2410;
+}
+.danger {
+  color: var(--danger);
+  background: #2c1514;
+}
+.warn .text,
+.danger .text {
+  color: var(--text);
+}
+.sub {
+  padding: 4px 16px;
+  font-size: 0.85rem;
+}
+.dim {
+  color: var(--text-dim);
+  background: var(--surface-2);
+}

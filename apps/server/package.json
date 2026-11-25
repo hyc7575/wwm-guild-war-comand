@@ -1,0 +1,27 @@
+{
+  "name": "@winds/server",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev --port 8787",
+    "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.integration.json",
+    "test": "vitest run --passWithNoTests",
+    "test:integration": "tsx test-integration/run.ts",
+    "dev:assets": "wrangler dev -c wrangler.deploy.jsonc --port 8788",
+    "build:deploy": "pnpm --filter @winds/web build && wrangler deploy -c wrangler.deploy.jsonc --dry-run --outdir .wrangler/dryrun",
+    "deploy": "pnpm --filter @winds/web build && wrangler deploy -c wrangler.deploy.jsonc"
+  },
+  "dependencies": {
+    "@winds/protocol": "workspace:*",
+    "@winds/room-core": "workspace:*"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^5.20261124.1",
+    "@types/node": "^26.6.6",
+    "@types/ws": "^8.18.2",
+    "tsx": "^4.23.15",
+    "wrangler": "^4.168.0",
+    "ws": "^8.23.0"
+  }
+}

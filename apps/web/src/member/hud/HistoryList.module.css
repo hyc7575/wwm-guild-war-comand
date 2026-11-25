@@ -1,0 +1,76 @@
+.wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-size: calc(0.95rem * var(--hud-fs, 1));
+}
+.filters {
+  display: flex;
+  gap: 8px;
+}
+.filters button {
+  min-height: 44px;
+  padding: 0 14px;
+  color: var(--text);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+.filters button[aria-pressed='true'] {
+  border-color: var(--accent);
+  outline: 1px solid var(--accent);
+}
+.list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 10px;
+  padding: 6px 10px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  background: var(--surface);
+  border-radius: 8px;
+}
+.time {
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+}
+.body[data-struck='true'] {
+  text-decoration: line-through;
+  color: var(--text-dim);
+}
+.tag {
+  padding: 1px 8px;
+  font-size: 0.85em;
+  color: var(--text);
+  background: var(--surface-2);
+  border: 1px solid var(--text-dim);
+  border-radius: 999px;
+}
+.tag[data-kind='issuer'] {
+  border-style: dashed;
+}
+.tag[data-kind='corrected'] {
+  border-color: var(--warn);
+}
+.tag[data-kind='cancelled'] {
+  border-color: var(--danger);
+}
+.empty {
+  margin: 0;
+  color: var(--text-dim);
+}
+
+.transcript {
+  flex-basis: 100%;
+  font-size: 0.85em;
+  color: var(--text-dim);
+}

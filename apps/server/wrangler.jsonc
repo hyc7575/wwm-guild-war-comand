@@ -1,0 +1,17 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "winds-command",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-11-01",
+  "dev": { "port": 8787 },
+  "vars": {
+    // Empty = dev policy: same origin or loopback (localhost, 127.0.0.1, [::1]) only.
+    "ALLOWED_ORIGINS": "",
+    // "<POST /api/rooms per min>,<GET room + WebSocket upgrade per min>" per IP. Generous for dev/tests (loopback is one IP).
+    "HTTP_RATE_LIMIT": "100000,100000"
+  },
+  "durable_objects": {
+    "bindings": [{ "name": "ROOM", "class_name": "RoomDO" }]
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["RoomDO"] }]
+}

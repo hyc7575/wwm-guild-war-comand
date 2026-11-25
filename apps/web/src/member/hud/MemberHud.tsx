@@ -1,0 +1,261 @@
+import { useEffect, useState } from 'react';
+import { createPortal } from 'react-dom';
+import type { Party } from '@winds/protocol';
+import { useRoomStore } from '../../state/roomStore';
+import { NoticeToast } from '../../shared/NoticeToast';
+import { CommandCard } from './CommandCard';
+import { AllLine } from './AllLine';
+import { HistoryList } from './HistoryList';
+import { HudStatusBar } from './HudStatusBar';
+import { PartyGrid } from './PartyGrid';
+import { SettingsDrawer } from './SettingsDrawer';
+import { isAudioBlocked, onAudioStateChange, unlockAudio } from './beeper';
+import { gridColumns, orderParties, shouldCompactIdle } from './gridLayout';
+import { supportersOf } from './model';
+import { FONT_SCALE, useHudSettings } from './settings';
+import { useCardEffects } from './useCardEffects';
+import { useMemberHudModel } from './useMemberHudModel';
+import { useMediaQuery, useNow } from './useNow';
+import { useWakeLock } from './useWakeLock';
+import { PastHistory } from '../history';
+import { CompactHud } from '../pip/CompactHud';
+import { usePipWindow } from '../pip/usePipWindow';
+import styles from './MemberHud.module.css';
+
+/** Is audio waiting for a user gesture? Any first tap also unlocks it (US-F05-2). */
+function useAudioBlocked(enabled: boolean): boolean {
+  const [blocked, setBlocked] = useState(() => enabled && !!isAudioBlocked());
+  useEffect(() => {
+    if (!enabled) {
+      setBlocked(false);
+      return;
+    }
+    const sync = () => setBlocked(!!isAudioBlocked());
+    sync();
+    const off = onAudioStateChange(sync);
+    const first = () => void unlockAudio();
+    document.addEventListener('pointerdown', first, { once: true });
+    return () => {
+      off?.();
+      document.removeEventListener('pointerdown', first);
+    };
+  }, [enabled]);
+  return blocked;
+}
+
+export function MemberHud({ onChangeParty }: { onChangeParty(): void }) {
+  const m = useMemberHudModel();
+  const roomCode = useRoomStore((s) => s.roomCode);
+  const shareTranscript = useRoomStore((s) => s.settings.shareTranscript);
+  const { settings, update } = useHudSettings();
+  const now = useNow(1000);
+  const wide = useMediaQuery('(min-width: 900px)');
+  const tablet = useMediaQuery('(min-width: 600px)');
+  const osReduced = useMediaQuery('(prefers-reduced-motion: reduce)');
+  const fx = useCardEffects(m, settings);
+  const audioBlocked = useAudioBlocked(settings.soundOn);
+  useWakeLock(settings.wakeLockOn && !m.closed);
+
+  const pip = usePipWindow();
+  const closePip = pip.close;
+  useEffect(() => {
+    if (m.closed) closePip();
+  }, [m.closed, closePip]);
+
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [focus, setFocus] = useState<Party | null>(null);
+
+  if (m.closed) {
+    return (
+      <main className={styles.closed} data-testid="room-closed">
+        <h1>오더방이 종료되었습니다</h1>
+      </main>
+    );
+  }
+
+  const reduced = settings.reduceMotion || osReduced;
+  const shownCommand = fx.struckCommand ?? m.myCommand;
+  const unselected = !m.myParty;
+  // FR-F06-6: someone without a party always sees equal, party-number-ordered cells
+  const activeFirst = settings.activeFirst && !unselected;
+  const gridList = orderParties(m.gridParties, m.commandOf, activeFirst);
+  const columns = gridColumns(gridList.length, wide ? 'wide' : tablet ? 'tablet' : 'phone');
+  const compactIdle = shouldCompactIdle(m.parties.length, activeFirst);
+  const focusParty = focus ? m.parties.find((p) => p.id === focus.id) : undefined;
+
+  return (
+    <div
+      className={styles.hud}
+      data-wide={wide ? 'true' : undefined}
+      data-reduced-motion={reduced ? 'true' : 'false'}
+      style={{ ['--hud-fs' as string]: String(FONT_SCALE[settings.fontStep]) }}
+    >
+      <div className={styles.top}>
+        <HudStatusBar
+          connection={m.connection}
+          hasSnapshot={m.hasSnapshot}
+          presence={m.presence}
+          myPartyText={m.myParty ? (m.myParty.name ? `${m.myParty.number}파티 ${m.myParty.name}` : `${m.myParty.number}파티`) : undefined}
+          onChangeParty={onChangeParty}
+          onOpenSettings={() => setSettingsOpen(true)}
+          onOpenPip={pip.supported && !pip.win ? () => void pip.open() : undefined}
+        />
+        {m.connection === 'RECONNECTING' && (
+          <div className={styles.band} data-tone="warn" data-testid="banner-reconnecting" role="alert">
+            다시 연결 중… 화면의 명령이 최신이 아닐 수 있습니다
+          </div>
+        )}
+        {m.connection === 'OFFLINE' && (
+          <div className={styles.band} data-tone="danger" data-testid="banner-offline" role="alert">
+            인터넷 연결 없음
+          </div>
+        )}
+        {m.connection === 'REPLACED' && (
+          <div className={styles.band} data-tone="danger" data-testid="banner-replaced" role="alert">
+            다른 탭에서 열렸습니다. 이 화면은 더 이상 갱신되지 않습니다
+          </div>
+        )}
+        {audioBlocked && (
+          <button type="button" className={styles.sound} data-testid="enable-sound" onClick={() => void unlockAudio()}>
+            소리 켜기
+          </button>
+        )}
+      </div>
+
+      {pip.error && !pip.win && (
+        <div className={styles.band} data-tone="warn" role="alert" data-testid="pip-error">
+          {pip.error === 'UNSUPPORTED' ? '이 브라우저는 작은 창을 지원하지 않습니다' : '작은 창을 열지 못했습니다'}
+        </div>
+      )}
+      {pip.win && (
+        <p className={styles.hint} data-testid="pip-active">
+          작은 창으로 표시 중입니다.{' '}
+          <button type="button" className={styles.toggle} data-testid="pip-close" onClick={pip.close}>
+            본 창으로 되돌리기
+          </button>
+        </p>
+      )}
+      {pip.win &&
+        createPortal(
+          <CompactHud
+            connection={m.connection}
+            hasSnapshot={m.hasSnapshot}
+            presence={m.presence}
+            parties={m.parties}
+            myParty={m.myParty}
+            command={shownCommand}
+            original={fx.struckCommand ? null : m.original}
+            supportFrom={fx.struckCommand ? [] : m.supportFrom}
+            allLine={m.allLine}
+            now={now}
+            dimmed={m.dimmed}
+            flashing={fx.flashing}
+            pulsing={fx.pulsing}
+            struck={!!fx.struckCommand}
+            restore={fx.restore}
+            fontScale={FONT_SCALE[settings.fontStep]}
+            reducedMotion={reduced}
+            audioBlocked={audioBlocked}
+            onUnlockAudio={() => void unlockAudio()}
+            onReturn={pip.close}
+          />,
+          pip.win.document.body,
+        )}
+      {pip.win ? null : !m.hasSnapshot ? (
+        <p className={styles.loading}>방 정보를 불러오는 중…</p>
+      ) : (
+        <div className={styles.body} data-unselected={unselected ? 'true' : undefined}>
+          {unselected && (
+            <p className={styles.hint} data-testid="unselected-hint">
+              내 파티를 고르면 내 명령을 크게 볼 수 있습니다
+            </p>
+          )}
+          {unselected && m.allLine && (
+            <div className={styles.all}>
+              <AllLine command={m.allLine} now={now} dimmed={m.dimmed} />
+            </div>
+          )}
+          {m.myParty && (
+            <div className={styles.mine}>
+              <CommandCard
+                command={shownCommand}
+                parties={m.parties}
+                owner={m.myParty}
+                original={fx.struckCommand ? null : m.original}
+                supportFrom={fx.struckCommand ? [] : m.supportFrom}
+                now={now}
+                dimmed={m.dimmed}
+                flashing={fx.flashing}
+                pulsing={fx.pulsing}
+                struck={!!fx.struckCommand}
+                restore={fx.restore}
+                transcript={shareTranscript ? shownCommand?.transcript : null}
+              />
+            </div>
+          )}
+          {!unselected && m.allLine && (
+            <div className={styles.all}>
+              <AllLine command={m.allLine} now={now} dimmed={m.dimmed} />
+            </div>
+          )}
+          <div className={styles.grid}>
+            <PartyGrid
+              parties={gridList}
+              columns={unselected && wide ? undefined : columns}
+              compactIdle={compactIdle}
+              commandOf={m.commandOf}
+              now={now}
+              large={unselected}
+              dimmed={m.dimmed}
+              onSelect={setFocus}
+            />
+          </div>
+          <section className={styles.history}>
+            {!wide && (
+              <button type="button" className={styles.toggle} aria-expanded={historyOpen} data-testid="history-toggle" onClick={() => setHistoryOpen((v) => !v)}>
+                최근 이력 {historyOpen ? '▾' : '▸'}
+              </button>
+            )}
+            {wide && <h2 className={styles.h2}>최근 이력</h2>}
+            {(wide || historyOpen) && (
+              <HistoryList
+                parties={m.parties}
+                rows={m.history}
+                commands={m.commands}
+                filter={m.historyFilter}
+                onFilter={m.setHistoryFilter}
+                canFilterMine={!unselected}
+                showTranscript={shareTranscript}
+              />
+            )}
+            {(wide || historyOpen) && roomCode && <PastHistory roomCode={roomCode} currentIds={new Set(Object.keys(m.commands))} />}
+          </section>
+        </div>
+      )}
+
+      {focusParty && (
+        <div className={styles.focusBack} onClick={() => setFocus(null)}>
+          <div className={styles.focus} role="dialog" aria-modal="true" aria-label={`${focusParty.number}파티 명령`} data-testid="focus-view" onClick={(e) => e.stopPropagation()}>
+            <CommandCard
+              command={m.commandOf(focusParty.id)}
+              parties={m.parties}
+              owner={focusParty}
+              supportFrom={supportersOf(focusParty.id, m.parties, m.slots, m.commands)}
+              now={now}
+              dimmed={m.dimmed}
+              testId="focus-card"
+              idPrefix="focus-card"
+            />
+            <button type="button" className={styles.focusClose} data-testid="focus-close" onClick={() => setFocus(null)}>
+              닫기
+            </button>
+          </div>
+        </div>
+      )}
+
+      {settingsOpen && <SettingsDrawer settings={settings} onChange={update} onClose={() => setSettingsOpen(false)} />}
+      <NoticeToast />
+    </div>
+  );
+}

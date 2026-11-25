@@ -1,0 +1,19 @@
+{
+  "name": "@winds/loadtest",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "load": "tsx src/load.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@winds/protocol": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.6",
+    "@types/ws": "^8.18.2",
+    "tsx": "^4.23.15",
+    "ws": "^8.23.0"
+  }
+}

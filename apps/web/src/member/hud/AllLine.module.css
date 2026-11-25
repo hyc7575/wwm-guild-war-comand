@@ -1,0 +1,22 @@
+.line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+  margin: 0;
+  padding: 10px 12px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  font-size: calc(1rem * var(--hud-fs, 1));
+}
+.line[data-dimmed='true'] {
+  opacity: 0.4;
+}
+.label {
+  color: var(--text-dim);
+}
+.age {
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+}

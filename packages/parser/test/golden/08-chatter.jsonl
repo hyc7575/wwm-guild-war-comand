@@ -1,0 +1,46 @@
+// 명령이 아닌 발화 (NONE 이어야 함)
+{"text": "좋아요", "expect": [{"kind": "NONE"}]}
+{"text": "상대 많네요", "expect": [{"kind": "NONE"}]}
+{"text": "다 왔어요?", "expect": [{"kind": "NONE"}]}
+{"text": "지금 어디예요", "expect": [{"kind": "NONE"}]}
+{"text": "네 알겠습니다", "expect": [{"kind": "NONE"}]}
+{"text": "오늘 길드전 몇 시에 시작해요", "expect": [{"kind": "NONE"}]}
+{"text": "방어력이 너무 낮아요", "expect": [{"kind": "NONE"}]}
+{"text": "공격력 올려야 돼요", "expect": [{"kind": "NONE"}]}
+{"text": "지원군이 왔어요", "expect": [{"kind": "NONE"}]}
+{"text": "대기업 다니는 사람", "expect": [{"kind": "NONE"}]}
+{"text": "전체적으로 괜찮아요", "expect": [{"kind": "NONE"}]}
+{"text": "우리 파티 잘하네요", "expect": [{"kind": "NONE"}]}
+{"text": "다음 전투 준비해요", "expect": [{"kind": "NONE"}]}
+{"text": "와 대박", "expect": [{"kind": "NONE"}]}
+{"text": "와 진짜 많다", "expect": [{"kind": "NONE"}]}
+{"text": "가자 가자", "expect": [{"kind": "NONE"}]}
+{"text": "가자", "expect": [{"kind": "NONE"}]}
+{"text": "중앙", "expect": [{"kind": "NONE"}]}
+{"text": "1파티", "expect": [{"kind": "NONE"}]}
+{"text": "1파티 중앙", "expect": [{"kind": "NONE"}]}
+{"text": "수고하셨습니다", "expect": [{"kind": "NONE"}]}
+{"text": "아 힐러 부족해요", "expect": [{"kind": "NONE"}]}
+{"text": "상대 3파티 정도 있는 것 같아요", "expect": [{"kind": "NONE"}]}
+{"text": "저쪽에 상대 파티 많아요", "expect": [{"kind": "NONE"}]}
+{"text": "이동속도 버프 켜요", "expect": [{"kind": "NONE"}]}
+{"text": "가끔 막혀요", "expect": [{"kind": "NONE"}]}
+{"text": "모두 수고했어요", "expect": [{"kind": "NONE"}]}
+{"text": "다들 힘내요", "expect": [{"kind": "NONE"}]}
+{"text": "중앙에 상대 많네요", "expect": [{"kind": "NONE"}]}
+{"text": "좌우로 흔들려요", "expect": [{"kind": "NONE"}]}
+{"text": "어디로 가요?", "expect": [{"kind": "NONE"}]}
+{"text": "거기 앞에 상대 있어요", "expect": [{"kind": "NONE"}]}
+{"text": "중앙 어디예요", "expect": [{"kind": "NONE"}]}
+{"text": "네", "expect": [{"kind": "NONE"}]}
+{"text": "음 잠깐만요", "expect": [{"kind": "NONE"}]}
+{"text": "마이크 테스트 하나 둘", "expect": [{"kind": "NONE"}]}
+{"text": "이쪽 길 막혔어요", "expect": [{"kind": "NONE"}]}
+{"text": "우리 편 인원 몇 명이에요", "expect": [{"kind": "NONE"}]}
+{"text": "잘 들려요?", "expect": [{"kind": "NONE"}]}
+{"text": "이 파티 괜찮은데요", "expect": [{"kind": "NONE"}]}
+{"text": "1파티 잘했어요", "expect": [{"kind": "NONE"}]}
+{"text": "3파티 수고하셨어요", "expect": [{"kind": "NONE"}]}
+{"text": "전원 수고했습니다", "expect": [{"kind": "NONE"}]}
+{"text": "", "expect": [{"kind": "NONE"}]}
+{"text": "상대 공격 들어오네요", "note": "상대 주어 + 서술 어미, 대상 없음", "expect": [{"kind": "NONE"}]}

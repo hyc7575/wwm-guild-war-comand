@@ -1,0 +1,14 @@
+// Q1 대상 없는 명령, targetlessAsAll 옵션, 약한 표현
+{"text": "중앙으로 모여", "options": {"targetlessAsAll": true}, "expect": [{"kind": "ISSUE", "confidence": "HIGH", "target": "ALL", "action": "GATHER", "location": "CENTER"}]}
+{"text": "우측 지켜", "options": {"targetlessAsAll": true}, "expect": [{"kind": "ISSUE", "confidence": "HIGH", "target": "ALL", "action": "DEFEND", "location": "RIGHT"}]}
+{"text": "모여", "options": {"targetlessAsAll": true}, "expect": [{"kind": "ISSUE", "confidence": "HIGH", "target": "ALL", "action": "GATHER"}]}
+{"text": "후퇴", "options": {"targetlessAsAll": true}, "expect": [{"kind": "ISSUE", "confidence": "HIGH", "target": "ALL", "action": "RETREAT"}]}
+{"text": "후퇴", "expect": [{"kind": "ISSUE", "confidence": "MEDIUM", "target": "ALL", "action": "RETREAT"}]}
+{"text": "우측 지켜", "expect": [{"kind": "ISSUE", "confidence": "MEDIUM", "target": "ALL", "action": "DEFEND", "location": "RIGHT"}]}
+{"text": "가자 가자", "options": {"targetlessAsAll": true}, "expect": [{"kind": "NONE"}]}
+{"text": "중앙으로 가", "options": {"targetlessAsAll": true}, "note": "약한 행동은 옵션과 무관하게 중간", "expect": [{"kind": "ISSUE", "confidence": "MEDIUM", "target": "ALL", "action": "MOVE", "location": "CENTER"}]}
+{"text": "가자 가자 중앙으로", "expect": [{"kind": "ISSUE", "confidence": "MEDIUM", "target": "ALL", "action": "MOVE", "location": "CENTER"}]}
+{"text": "지금 바로 중앙으로 모여주세요", "expect": [{"kind": "ISSUE", "confidence": "MEDIUM", "target": "ALL", "action": "GATHER", "location": "CENTER"}]}
+{"text": "도와줘", "options": {"targetlessAsAll": true}, "expect": [{"kind": "ISSUE", "confidence": "MEDIUM", "target": "ALL", "action": "SUPPORT"}]}
+{"text": "1파티 도와줘", "options": {"targetlessAsAll": true}, "expect": [{"kind": "ISSUE", "confidence": "MEDIUM", "target": [1], "action": "SUPPORT"}]}
+{"text": "1파티 말고 모두 모여", "options": {"targetlessAsAll": true}, "note": "말고 앞쪽 내용이 있고 정정이 아니면 중간", "expect": [{"kind": "ISSUE", "confidence": "MEDIUM", "target": "ALL", "action": "GATHER"}]}

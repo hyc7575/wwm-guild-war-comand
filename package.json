@@ -1,0 +1,19 @@
+{
+  "name": "winds-command",
+  "private": true,
+  "version": "0.0.0",
+  "packageManager": "pnpm@11.3.0",
+  "scripts": {
+    "test": "pnpm -r --if-present test",
+    "typecheck": "pnpm -r --if-present typecheck",
+    "format": "prettier --write .",
+    "fetch:stt-wasm": "node scripts/fetch-sherpa-wasm.mjs",
+    "smoke:stt": "node scripts/stt-smoke.mjs"
+  },
+  "devDependencies": {
+    "playwright": "^1.65.1",
+    "prettier": "^3.10.1",
+    "typescript": "^7.0.2",
+    "vitest": "^5.1.1"
+  }
+}

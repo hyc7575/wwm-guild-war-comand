@@ -1,0 +1,10 @@
+// F03 문서 "처리 예시" 표 9행 (원문 그대로)
+{"text": "1파티 2파티 중앙으로 모여", "expect": [{"kind": "ISSUE", "confidence": "HIGH", "target": [1, 2], "action": "GATHER", "location": "CENTER"}]}
+{"text": "3파티 오른쪽 지켜주세요", "expect": [{"kind": "ISSUE", "confidence": "HIGH", "target": [3], "action": "DEFEND", "location": "RIGHT"}]}
+{"text": "상대 인원이 생각보다 많네요", "expect": [{"kind": "NONE"}]}
+{"text": "전원 뒤로 빠져", "expect": [{"kind": "ISSUE", "confidence": "HIGH", "target": "ALL", "action": "RETREAT"}]}
+{"text": "중앙 말고 오른쪽으로 이동", "last": {"target": [1], "action": "GATHER", "location": "CENTER", "ageMs": 3000}, "expect": [{"kind": "CORRECT", "confidence": "HIGH", "patch": {"action": "MOVE", "location": "RIGHT"}}]}
+{"text": "중앙으로 모여", "expect": [{"kind": "ISSUE", "confidence": "MEDIUM", "target": "ALL", "action": "GATHER", "location": "CENTER"}]}
+{"text": "2파티 1파티 지원", "expect": [{"kind": "ISSUE", "confidence": "HIGH", "target": [2], "action": "SUPPORT", "support": [1]}]}
+{"text": "이 파티 너무 약하다", "expect": [{"kind": "NONE"}]}
+{"text": "방금 거 취소", "last": {"target": [1], "action": "GATHER", "location": "CENTER", "ageMs": 3000}, "expect": [{"kind": "CANCEL"}]}
