@@ -66,8 +66,10 @@ async function createRoom(request: Request, env: Env): Promise<Response> {
 
   const commanderToken = randomToken();
   const operatorToken = randomToken();
+  const subCommanderToken = randomToken();
   const commanderTokenHash = await sha256Hex(commanderToken);
   const operatorTokenHash = await sha256Hex(operatorToken);
+  const subCommanderTokenHash = await sha256Hex(subCommanderToken);
   const rng = randomRng();
 
   for (let attempt = 0; attempt < 8; attempt++) {
@@ -81,12 +83,13 @@ async function createRoom(request: Request, env: Env): Promise<Response> {
         settings: parsed.data.settings,
         commanderTokenHash,
         operatorTokenHash,
+        subCommanderTokenHash,
       }),
     });
     if (res.status === 409) continue; // collision: try another code
     if (!res.ok) return json({ error: 'INTERNAL' }, 500);
     const { expiresAt } = (await res.json()) as { expiresAt: number };
-    const out: CreateRoomResponse = { code, commanderToken, operatorToken, expiresAt };
+    const out: CreateRoomResponse = { code, commanderToken, operatorToken, subCommanderToken, expiresAt };
     return json(out, 201);
   }
   return json({ error: 'INTERNAL' }, 503);

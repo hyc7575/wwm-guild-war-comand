@@ -1,11 +1,11 @@
-import type { Presence, SttState } from '@winds/protocol';
+import type { Presence, Role, SttState } from '@winds/protocol';
 
 export interface ConnInfo {
-  role: 'COMMANDER' | 'OPERATOR' | 'MEMBER';
+  role: Role;
   partyId: string | null;
 }
 
-/** `total` counts non-commander connections (members + operators). */
+/** `total` counts non-commander connections (members + operators + sub-commanders). */
 export function computePresence(
   conns: ConnInfo[],
   partyIds: string[],
@@ -18,12 +18,14 @@ export function computePresence(
   let unassigned = 0;
   let commanderOnline = false;
   let operatorsOnline = 0;
+  let subCommandersOnline = 0;
   for (const c of conns) {
     if (c.role === 'COMMANDER') {
       commanderOnline = true;
       continue;
     }
     if (c.role === 'OPERATOR') operatorsOnline++;
+    if (c.role === 'SUB_COMMANDER') subCommandersOnline++;
     total++;
     if (c.partyId && known.has(c.partyId)) byParty[c.partyId]!++;
     else unassigned++;
@@ -34,6 +36,7 @@ export function computePresence(
     unassigned,
     commanderOnline,
     operatorsOnline,
+    subCommandersOnline,
     sttState: commanderOnline ? sttState : 'OFF',
   };
 }

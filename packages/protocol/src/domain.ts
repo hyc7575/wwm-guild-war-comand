@@ -10,7 +10,7 @@ export type PartyId = z.infer<typeof PartyId>;
 export const CommandId = z.string().min(1).max(64);
 export type CommandId = z.infer<typeof CommandId>;
 
-export const Role = z.enum(['COMMANDER', 'OPERATOR', 'MEMBER']);
+export const Role = z.enum(['COMMANDER', 'SUB_COMMANDER', 'OPERATOR', 'MEMBER']);
 export type Role = z.infer<typeof Role>;
 
 export const Party = z.object({
@@ -49,6 +49,12 @@ export type CommandSource = z.infer<typeof CommandSource>;
 export const CancelReason = z.enum(['MISRECOGNIZED', 'CHANGED', 'PARTY_REMOVED']);
 export type CancelReason = z.infer<typeof CancelReason>;
 
+/** Who issued a command. Role only: no clientId/label (snapshot size, ID exposure). */
+export const CommandIssuer = z.object({
+  role: z.enum(['COMMANDER', 'SUB_COMMANDER', 'OPERATOR']),
+});
+export type CommandIssuer = z.infer<typeof CommandIssuer>;
+
 export const Command = z.object({
   id: CommandId,
   seq: z.number().int().nonnegative(),
@@ -66,6 +72,7 @@ export const Command = z.object({
   correctsId: CommandId.optional(),
   cancelReason: CancelReason.optional(),
   cancelledAt: z.number().optional(),
+  issuer: CommandIssuer.optional(),
 });
 export type Command = z.infer<typeof Command>;
 
@@ -99,6 +106,7 @@ export const Presence = z.object({
   unassigned: z.number().int().nonnegative(),
   commanderOnline: z.boolean(),
   operatorsOnline: z.number().int().nonnegative(),
+  subCommandersOnline: z.number().int().nonnegative().optional(),
   sttState: SttState,
 });
 export type Presence = z.infer<typeof Presence>;

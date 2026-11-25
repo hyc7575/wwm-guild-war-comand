@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { LIMITS } from '@winds/protocol';
 import { randomToken, sha256Hex, timingSafeEqual } from '../src/crypto';
 import { commanderStale, dueCloseReason, helloExpired, nextAlarmAt, planAlarm } from '../src/lifecycle';
+import { verifyHello } from '../src/auth';
 import { computePresence } from '../src/presence';
 import { TokenBucket, ViolationCounter, bucketKind, peekClientCmdId } from '../src/rateLimit';
 
@@ -34,6 +35,49 @@ describe('TokenBucket', () => {
   });
 });
 
+describe('computePresence sub-commanders', () => {
+  it('counts SUB_COMMANDER separately and in total', () => {
+    const p = computePresence(
+      [{ role: 'SUB_COMMANDER', partyId: null }, { role: 'OPERATOR', partyId: null }],
+      ['p1'],
+      'OFF',
+    );
+    expect(p).toMatchObject({ subCommandersOnline: 1, operatorsOnline: 1, total: 2, commanderOnline: false });
+  });
+});
+
+describe('verifyHello', () => {
+  const room = async (withSub: boolean) => ({
+    commanderTokenHash: await sha256Hex('C'),
+    operatorTokenHash: await sha256Hex('O'),
+    ...(withSub ? { subCommanderTokenHash: await sha256Hex('S') } : {}),
+  });
+  const hello = (role: 'COMMANDER' | 'SUB_COMMANDER' | 'OPERATOR' | 'MEMBER', extra = {}) =>
+    ({ v: 1, type: 'hello', roomCode: 'ABC234', clientId: 'x', role, ...extra }) as const;
+
+  it('sub-commander needs its own token', async () => {
+    const r = await room(true);
+    expect(await verifyHello(hello('SUB_COMMANDER', { subCommanderToken: 'S' }), r)).toBe(true);
+    expect(await verifyHello(hello('SUB_COMMANDER'), r)).toBe(false);
+    expect(await verifyHello(hello('SUB_COMMANDER', { subCommanderToken: 'bad' }), r)).toBe(false);
+    // other roles' tokens must not work
+    expect(await verifyHello(hello('SUB_COMMANDER', { subCommanderToken: 'O' }), r)).toBe(false);
+    expect(await verifyHello(hello('SUB_COMMANDER', { subCommanderToken: 'C' }), r)).toBe(false);
+  });
+  it('legacy room without sub hash: UNAUTHORIZED, no throw', async () => {
+    const r = await room(false);
+    expect(await verifyHello(hello('SUB_COMMANDER', { subCommanderToken: 'S' }), r)).toBe(false);
+  });
+  it('existing roles unchanged', async () => {
+    const r = await room(true);
+    expect(await verifyHello(hello('COMMANDER', { commanderToken: 'C' }), r)).toBe(true);
+    expect(await verifyHello(hello('COMMANDER', { commanderToken: 'O' }), r)).toBe(false);
+    expect(await verifyHello(hello('OPERATOR', { operatorToken: 'O' }), r)).toBe(true);
+    expect(await verifyHello(hello('OPERATOR', { operatorToken: 'S' }), r)).toBe(false);
+    expect(await verifyHello(hello('MEMBER'), r)).toBe(true);
+  });
+});
+
 describe('computePresence', () => {
   it('counts non-commander connections by party', () => {
     const p = computePresence(
@@ -49,7 +93,7 @@ describe('computePresence', () => {
     );
     expect(p).toEqual({
       total: 4, byParty: { p1: 2, p2: 0 }, unassigned: 2,
-      commanderOnline: true, operatorsOnline: 1, sttState: 'LISTENING',
+      commanderOnline: true, operatorsOnline: 1, subCommandersOnline: 0, sttState: 'LISTENING',
     });
   });
   it('sttState is OFF when commander offline', () => {

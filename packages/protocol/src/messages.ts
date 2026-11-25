@@ -35,6 +35,7 @@ export const HelloMsg = z.object({
   role: Role,
   commanderToken: z.string().min(1).max(128).optional(),
   operatorToken: z.string().min(1).max(128).optional(),
+  subCommanderToken: z.string().min(1).max(128).optional(),
   lastSeq: z.number().int().nonnegative().optional(),
   nickname: z.string().max(LIMITS.nicknameMax).optional(),
 });
@@ -105,7 +106,10 @@ export const EventMsg = z.discriminatedUnion('kind', [
   z.object({ ...evBase, kind: z.literal('command.corrected'),
     payload: z.object({ command: Command, correctedId: CommandId, slots: Slots }) }),
   z.object({ ...evBase, kind: z.literal('command.cancelled'),
-    payload: z.object({ commandIds: z.array(CommandId).min(1), reason: CancelReason, slots: Slots }) }),
+    payload: z.object({
+      commandIds: z.array(CommandId).min(1), reason: CancelReason, slots: Slots,
+      cancelledBy: Role.optional(),
+    }) }),
   z.object({ ...evBase, kind: z.literal('parties.updated'),
     payload: z.object({
       parties: z.array(Party), partyConfigVersion: z.number().int().nonnegative(),
@@ -174,6 +178,6 @@ export const CreateRoomRequest = z.object({
 });
 export type CreateRoomRequest = z.infer<typeof CreateRoomRequest>;
 export const CreateRoomResponse = z.object({
-  code: z.string(), commanderToken: z.string(), operatorToken: z.string(), expiresAt: z.number(),
+  code: z.string(), commanderToken: z.string(), operatorToken: z.string(), subCommanderToken: z.string(), expiresAt: z.number(),
 });
 export type CreateRoomResponse = z.infer<typeof CreateRoomResponse>;

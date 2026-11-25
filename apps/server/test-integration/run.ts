@@ -159,7 +159,7 @@ async function main() {
       body: JSON.stringify({ parties: [{ name: '돌격' }, { name: '수비' }, {}] }),
     });
     check(created.status === 201 && created.headers.get('access-control-allow-origin') === '*', 'create room 201 + CORS');
-    const { code, commanderToken, operatorToken } = (await created.json()) as any;
+    const { code, commanderToken, operatorToken, subCommanderToken } = (await created.json()) as any;
     check(/^[A-HJKMNP-Z2-9]{6}$/.test(code), `room code ${code}`);
     const info = await api(`/api/rooms/${code.toLowerCase()}`);
     const infoJson = (await info.json()) as any;
@@ -311,6 +311,39 @@ async function main() {
     check(feed.from === 'COMMANDER' && feed.entries.length === 1, 'stt.feed relayed to operator');
     check(!members[0]!.msgs.some((m) => m.type === 'stt.feed'), 'stt.feed not sent to members');
     op.close();
+
+    console.log('sub-commander');
+    const noTok = await mk('subNoTok').connect(code);
+    noTok.send({ type: 'hello', roomCode: code, clientId: 'sub0', role: 'SUB_COMMANDER' });
+    check((await noTok.type('error')).code === 'UNAUTHORIZED', 'sub hello without token -> UNAUTHORIZED');
+    const badTok = await mk('subBad').connect(code);
+    badTok.send({ type: 'hello', roomCode: code, clientId: 'sub0', role: 'SUB_COMMANDER', subCommanderToken: 'wrong' });
+    check((await badTok.type('error')).code === 'UNAUTHORIZED', 'sub hello with wrong token -> UNAUTHORIZED');
+    const opTokAsSub = await mk('subOpTok').connect(code);
+    opTokAsSub.send({ type: 'hello', roomCode: code, clientId: 'sub0', role: 'SUB_COMMANDER', subCommanderToken: operatorToken });
+    check((await opTokAsSub.type('error')).code === 'UNAUTHORIZED', 'operator token cannot open a sub session');
+    const sub = await mk('sub', 250).connect(code);
+    sub.send({ type: 'hello', roomCode: code, clientId: 'sub1', role: 'SUB_COMMANDER', subCommanderToken });
+    check((await sub.type('welcome')).role === 'SUB_COMMANDER', 'sub welcome');
+    const subMark = members.map((m) => m.mark());
+    const subCmd = cid();
+    sub.send({ type: 'command.issue', clientCmdId: subCmd, target: { kind: 'ALL' }, action: 'HOLD', source: 'MANUAL', issuer: { role: 'COMMANDER' } });
+    check(!!(await sub.ack(subCmd)).commandId, 'sub can issue');
+    const subEv = await members[0]!.event('command.issued', subMark[0]);
+    check(subEv.payload.command.issuer?.role === 'SUB_COMMANDER', 'member sees issuer.role SUB_COMMANDER (client issuer ignored)');
+    const subSet = cid();
+    sub.send({ type: 'room.settings', clientCmdId: subSet, settings: { shareTranscript: true } });
+    check((await sub.ack(subSet)).error === 'FORBIDDEN', 'sub room.settings -> FORBIDDEN');
+    const subParties = cid();
+    sub.send({ type: 'parties.update', clientCmdId: subParties, baseVersion: 1, parties: welcome.snapshot.parties });
+    check((await sub.ack(subParties)).error === 'FORBIDDEN', 'sub parties.update -> FORBIDDEN');
+    sub.send({ type: 'stt.status', state: 'LISTENING' });
+    check((await sub.type('error')).code === 'FORBIDDEN', 'sub stt.status -> FORBIDDEN');
+    cmd.send({ type: 'stt.feed', entries: [{ id: 'e2', at: Date.now(), text: '집결', outcome: 'ISSUED' }] });
+    check((await sub.type('stt.feed')).from === 'COMMANDER', 'stt.feed relayed to sub');
+    const subPres = await cmd.waitFor((m) => m.type === 'presence' && m.subCommandersOnline === 1, 6000);
+    check(subPres.subCommandersOnline === 1, 'presence.subCommandersOnline');
+    sub.close();
 
     console.log('reconnect');
     const m0 = members[0]!;

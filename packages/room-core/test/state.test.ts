@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { LIMITS, type Party, type Presence } from '@winds/protocol';
 import {
+  canAdmin,
+  canCommand,
   cancelCommand,
   closeRoom,
   correctCommand,
@@ -30,6 +32,7 @@ function mk(n = 3): RoomState {
     parties: Array.from({ length: n }, () => ({})),
     commanderTokenHash: 'h1',
     operatorTokenHash: 'h2',
+    subCommanderTokenHash: 'h3',
   });
 }
 function ok(r: Result): Extract<Result, { ok: true }> {
@@ -49,7 +52,7 @@ describe('createRoomState', () => {
   it('assigns stable ids, empty stacks, hashes, expiry', () => {
     const s = createRoomState({
       code: 'ABC234', now: T0, parties: [{ name: '돌격' }, { aliases: ['수비조'] }],
-      settings: { shareTranscript: true }, commanderTokenHash: 'a', operatorTokenHash: 'b',
+      settings: { shareTranscript: true }, commanderTokenHash: 'a', operatorTokenHash: 'b', subCommanderTokenHash: 'c',
     });
     expect(s.parties.map((p) => p.id)).toEqual(['p1', 'p2']);
     expect(s.parties[0]!.name).toBe('돌격');
@@ -487,7 +490,7 @@ describe('review fixes', () => {
   it('snapshot: worst case (50 cmds, 200 Hangul chars, 12 parties) stays under 32KB and keeps only the newest transcripts', () => {
     let s = createRoomState({
       code: 'ABC234', now: T0, parties: Array.from({ length: 12 }, () => ({ name: '가나다라마바사아자차', aliases: ['가나다라마바사아', '자차카타파하갸냐'] })),
-      commanderTokenHash: 'h'.repeat(64), operatorTokenHash: 'h'.repeat(64),
+      commanderTokenHash: 'h'.repeat(64), operatorTokenHash: 'h'.repeat(64), subCommanderTokenHash: 'h'.repeat(64),
     });
     const ids = s.parties.map((p) => p.id);
     let n = 0;
@@ -506,5 +509,83 @@ describe('review fixes', () => {
       expect(snap.commands.slice(-SNAPSHOT_TRANSCRIPT_COMMANDS).every((c) => c.transcript !== undefined)).toBe(true);
       expect(utf8Bytes(JSON.stringify({ type: 'welcome', snapshot: snap }))).toBeLessThan(32 * 1024);
     }
+  });
+});
+
+describe('sub-commander (multiple issuers)', () => {
+  const main = (now = T0) => ({ now, newId, issuer: { role: 'COMMANDER' } as const });
+  const sub = (now = T0) => ({ now, newId, issuer: { role: 'SUB_COMMANDER' } as const });
+
+  it('permission predicates', () => {
+    expect(canCommand('SUB_COMMANDER') && canCommand('OPERATOR') && canCommand('COMMANDER')).toBe(true);
+    expect(canCommand('MEMBER')).toBe(false);
+    expect(canAdmin('COMMANDER')).toBe(true);
+    expect(canAdmin('SUB_COMMANDER') || canAdmin('OPERATOR') || canAdmin('MEMBER')).toBe(false);
+  });
+
+  it('issuer is filled from ctx; client-sent issuer is ignored', () => {
+    const s0 = mk();
+    const forged = { target: P('p1'), action: 'ATTACK', source: 'MANUAL', issuer: { role: 'COMMANDER' } } as never;
+    const r = ok(issueCommand(s0, forged, sub()));
+    expect(r.state.commands[0]!.issuer).toEqual({ role: 'SUB_COMMANDER' });
+    const evCmd = (r.events[0] as { payload: { command: { issuer?: unknown } } }).payload.command;
+    expect(evCmd.issuer).toEqual({ role: 'SUB_COMMANDER' });
+    // no ctx issuer -> no issuer, even if the input carried one
+    const r2 = ok(issueCommand(mk(), forged, ctx()));
+    expect(r2.state.commands[0]!.issuer).toBeUndefined();
+  });
+
+  it('sub issue on same party becomes current; cancelling it restores main order', () => {
+    let s = mk();
+    s = ok(issueCommand(s, { target: P('p1'), action: 'ATTACK', source: 'MANUAL' }, main(T0))).state;
+    const mainId = s.commands[0]!.id;
+    s = ok(issueCommand(s, { target: P('p1'), action: 'DEFEND', source: 'MANUAL' }, sub(T0 + 1000))).state;
+    const subId = s.commands[1]!.id;
+    expect(currentCommandId(s, 'p1')).toBe(subId);
+    expect(get(s, mainId).status).toBe('SUPERSEDED');
+    const c = ok(cancelCommand(s, { commandId: subId }, main(T0 + 2000)));
+    expect(currentCommandId(c.state, 'p1')).toBe(mainId);
+    expect(get(c.state, mainId).issuer).toEqual({ role: 'COMMANDER' });
+  });
+
+  it('repeat merges across issuers and keeps the original issuer', () => {
+    let s = mk();
+    s = ok(issueCommand(s, { target: P('p1'), action: 'ATTACK', source: 'MANUAL' }, main(T0))).state;
+    const r = ok(issueCommand(s, { target: P('p1'), action: 'ATTACK', source: 'MANUAL' }, sub(T0 + 500)));
+    expect(r.ack.note).toBe('REPEATED');
+    expect(r.state.commands).toHaveLength(1);
+    expect(r.state.commands[0]!.issuer).toEqual({ role: 'COMMANDER' });
+  });
+
+  it('correct and CORRECTION_AS_NEW fill issuer from the corrector', () => {
+    let s = mk();
+    s = ok(issueCommand(s, { target: P('p1'), action: 'ATTACK', source: 'MANUAL' }, main(T0))).state;
+    const id1 = s.commands[0]!.id;
+    const c = ok(correctCommand(s, { correctsId: id1, action: 'DEFEND', source: 'MANUAL' }, sub(T0 + 1000)));
+    const corrected = c.state.commands.at(-1)!;
+    expect(corrected.correctsId).toBe(id1);
+    expect(corrected.issuer).toEqual({ role: 'SUB_COMMANDER' });
+    // original now CORRECTED -> correcting it again takes the as-new path
+    const again = ok(correctCommand(c.state, { correctsId: id1, action: 'HOLD', source: 'MANUAL' }, main(T0 + 2000)));
+    expect(again.ack.note).toBe('CORRECTION_AS_NEW');
+    expect(again.state.commands.at(-1)!.issuer).toEqual({ role: 'COMMANDER' });
+  });
+
+  it('cancel event carries cancelledBy', () => {
+    let s = mk();
+    s = ok(issueCommand(s, { target: P('p1'), action: 'ATTACK', source: 'MANUAL' }, main(T0))).state;
+    const r = ok(cancelCommand(s, { commandId: s.commands[0]!.id }, sub(T0 + 1000)));
+    expect((r.events[0] as { payload: { cancelledBy?: string } }).payload.cancelledBy).toBe('SUB_COMMANDER');
+    // no issuer in ctx -> field absent
+    const r2 = ok(cancelCommand(s, { commandId: s.commands[0]!.id }, ctx(T0 + 1000)));
+    expect((r2.events[0] as { payload: { cancelledBy?: string } }).payload.cancelledBy).toBeUndefined();
+  });
+
+  it('sub cannot update parties, settings or close the room', () => {
+    const s = mk();
+    expect(updateParties(s, { baseVersion: 1, parties: s.parties }, sub())).toMatchObject({ ok: false, error: 'FORBIDDEN' });
+    expect(updateSettings(s, { shareTranscript: true }, sub())).toMatchObject({ ok: false, error: 'FORBIDDEN' });
+    expect(closeRoom(s, sub())).toMatchObject({ ok: false, error: 'FORBIDDEN' });
+    expect(updateSettings(s, { shareTranscript: true }, main()).ok).toBe(true);
   });
 });

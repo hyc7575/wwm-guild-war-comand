@@ -5,6 +5,7 @@ import {
   type Action,
   type CancelReason,
   type Command,
+  type CommandIssuer,
   type CommandSource,
   type CreateRoomRequest,
   type ErrorCode,
@@ -39,6 +40,8 @@ export interface RoomState {
   expiresAt: number;
   commanderTokenHash: string;
   operatorTokenHash: string;
+  /** Absent on rooms created before SUB_COMMANDER existed: nobody can authenticate as one. */
+  subCommanderTokenHash?: string;
   settings: RoomSettings;
   parties: Party[];
   partyConfigVersion: number;
@@ -56,7 +59,18 @@ export type Result = Ok | Err;
 export interface Ctx {
   now: number;
   newId: () => string;
+  /** Filled by the server from the connection, never from client payloads. */
+  issuer?: CommandIssuer;
 }
+
+/** May issue, correct and cancel commands. */
+export const canCommand = (role: Role): boolean =>
+  role === 'COMMANDER' || role === 'SUB_COMMANDER' || role === 'OPERATOR';
+/** May change parties/settings or close the room. */
+export const canAdmin = (role: Role): boolean => role === 'COMMANDER';
+
+const forbidden = (ctx: Ctx | undefined, check: (r: Role) => boolean): boolean =>
+  !!ctx?.issuer && !check(ctx.issuer.role);
 
 export interface IssueInput {
   target: Target;
@@ -97,6 +111,7 @@ export function createRoomState(args: {
   settings?: RoomSettingsPatch;
   commanderTokenHash: string;
   operatorTokenHash: string;
+  subCommanderTokenHash: string;
 }): RoomState {
   const base = makeDefaultParties(args.parties.length);
   const parties: Party[] = base.map((p, i) => {
@@ -114,6 +129,7 @@ export function createRoomState(args: {
     expiresAt: args.now + LIMITS.roomMaxLifetimeMs,
     commanderTokenHash: args.commanderTokenHash,
     operatorTokenHash: args.operatorTokenHash,
+    subCommanderTokenHash: args.subCommanderTokenHash,
     settings: { ...DEFAULT_ROOM_SETTINGS, ...args.settings },
     parties,
     partyConfigVersion: 1,
@@ -221,6 +237,7 @@ function issueCore(
   ctx: Ctx,
   opts: { skipRepeat?: boolean; note?: AckNote } = {},
 ): Result {
+  if (forbidden(ctx, canCommand)) return { ok: false, error: 'FORBIDDEN' };
   if (!validateRefs(state, input.target, input.supportPartyIds)) {
     return { ok: false, error: 'UNKNOWN_PARTY' };
   }
@@ -265,6 +282,7 @@ function issueCore(
     issuedAt: ctx.now,
     repeatCount: 0,
   };
+  if (ctx.issuer) cmd.issuer = { role: ctx.issuer.role };
   if (input.location) cmd.location = input.location;
   if (input.supportPartyIds) cmd.supportPartyIds = [...input.supportPartyIds];
   if (input.transcript !== undefined) cmd.transcript = input.transcript;
@@ -287,6 +305,7 @@ export function issueCommand(state: RoomState, input: IssueInput, ctx: Ctx): Res
 // ---------------------------------------------------------------- correct
 
 export function correctCommand(state: RoomState, input: CorrectInput, ctx: Ctx): Result {
+  if (forbidden(ctx, canCommand)) return { ok: false, error: 'FORBIDDEN' };
   const orig = state.commands.find((c) => c.id === input.correctsId);
   if (!orig) return { ok: false, error: 'UNKNOWN_COMMAND' };
 
@@ -339,6 +358,7 @@ export function correctCommand(state: RoomState, input: CorrectInput, ctx: Ctx):
     repeatCount: 0,
     correctsId: orig.id,
   };
+  if (ctx.issuer) cmd.issuer = { role: ctx.issuer.role };
   if (location) cmd.location = location;
   if (support) cmd.supportPartyIds = [...support];
   if (input.transcript !== undefined) cmd.transcript = input.transcript;
@@ -370,6 +390,7 @@ export function correctCommand(state: RoomState, input: CorrectInput, ctx: Ctx):
 // ---------------------------------------------------------------- cancel
 
 export function cancelCommand(state: RoomState, input: CancelInput, ctx: Ctx): Result {
+  if (forbidden(ctx, canCommand)) return { ok: false, error: 'FORBIDDEN' };
   const orig = state.commands.find((c) => c.id === input.commandId);
   if (!orig) return { ok: false, error: 'UNKNOWN_COMMAND' };
   if (orig.status === 'CANCELLED' || orig.status === 'CORRECTED') {
@@ -402,6 +423,7 @@ export function cancelCommand(state: RoomState, input: CancelInput, ctx: Ctx): R
     commandIds: [c.id],
     reason,
     slots: clone(s.slots),
+    ...(ctx.issuer ? { cancelledBy: ctx.issuer.role } : {}),
   });
   return { ok: true, state: s, events: [ev], ack: { commandId: c.id } };
 }
@@ -409,6 +431,7 @@ export function cancelCommand(state: RoomState, input: CancelInput, ctx: Ctx): R
 // ---------------------------------------------------------------- parties
 
 export function updateParties(state: RoomState, input: PartiesInput, ctx: Ctx): Result {
+  if (forbidden(ctx, canAdmin)) return { ok: false, error: 'FORBIDDEN' };
   if (input.baseVersion !== state.partyConfigVersion) return { ok: false, error: 'VERSION_CONFLICT' };
   const n = input.parties.length;
   if (n < LIMITS.minParties || n > LIMITS.maxParties) return { ok: false, error: 'INVALID_MESSAGE' };
@@ -449,7 +472,8 @@ export function updateParties(state: RoomState, input: PartiesInput, ctx: Ctx): 
   return { ok: true, state: s, events: [ev], ack: {} };
 }
 
-export function updateSettings(state: RoomState, patch: RoomSettingsPatch, _ctx?: Ctx): Result {
+export function updateSettings(state: RoomState, patch: RoomSettingsPatch, ctx?: Ctx): Result {
+  if (forbidden(ctx, canAdmin)) return { ok: false, error: 'FORBIDDEN' };
   const s = clone(state);
   for (const [k, v] of Object.entries(patch)) {
     if (v !== undefined) (s.settings as Record<string, unknown>)[k] = v;
@@ -458,7 +482,8 @@ export function updateSettings(state: RoomState, patch: RoomSettingsPatch, _ctx?
   return { ok: true, state: s, events: [ev], ack: {} };
 }
 
-export function closeRoom(state: RoomState, _ctx?: Ctx): Result {
+export function closeRoom(state: RoomState, ctx?: Ctx): Result {
+  if (forbidden(ctx, canAdmin)) return { ok: false, error: 'FORBIDDEN' };
   const s = clone(state);
   s.status = 'CLOSED';
   return { ok: true, state: s, events: [], ack: {} };

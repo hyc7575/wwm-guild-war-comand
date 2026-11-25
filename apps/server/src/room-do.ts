@@ -16,6 +16,8 @@ import {
 } from '@winds/protocol';
 import {
   cancelCommand,
+  canAdmin,
+  canCommand,
   closeRoom,
   correctCommand,
   createRoomState,
@@ -28,7 +30,7 @@ import {
   type Result,
   type RoomState,
 } from '@winds/room-core';
-import { sha256Hex, timingSafeEqual } from './crypto';
+import { verifyHello } from './auth';
 import type { Env } from './env';
 import { commanderStale, dueCloseReason, helloExpired, planAlarm, type CloseReason } from './lifecycle';
 import { computePresence, type ConnInfo } from './presence';
@@ -125,6 +127,7 @@ export class RoomDO extends DurableObject<Env> {
       settings?: CreateRoomRequest['settings'];
       commanderTokenHash: string;
       operatorTokenHash: string;
+      subCommanderTokenHash: string;
     };
     const now = Date.now();
     const state = createRoomState({ ...body, now });
@@ -280,7 +283,7 @@ export class RoomDO extends DurableObject<Env> {
       const roleRate =
         att.role === 'COMMANDER'
           ? LIMITS.commanderRatePerSec
-          : att.role === 'OPERATOR'
+          : att.role === 'OPERATOR' || att.role === 'SUB_COMMANDER'
             ? LIMITS.operatorRatePerSec
             : LIMITS.memberRatePerSec;
       // stt.* has its own budget so a multi-clause utterance cannot starve command requests.
@@ -307,7 +310,6 @@ export class RoomDO extends DurableObject<Env> {
       return this.failAndClose(ws, 'ROOM_NOT_FOUND', CLOSE_ROOM);
     }
     const isCommander = att.role === 'COMMANDER';
-    const canCommand = isCommander || att.role === 'OPERATOR';
 
     switch (msg.type) {
       case 'hello':
@@ -332,7 +334,7 @@ export class RoomDO extends DurableObject<Env> {
         if (!isCommander) return this.sendError(ws, 'FORBIDDEN');
         const relay = JSON.stringify({ v: 1, type: 'stt.feed', entries: msg.entries, from: att.role });
         for (const c of this.liveSockets()) {
-          if (c.ws !== ws && (c.att.role === 'COMMANDER' || c.att.role === 'OPERATOR')) {
+          if (c.ws !== ws && canCommand(c.att.role)) {
             try {
               c.ws.send(relay);
             } catch {
@@ -350,8 +352,8 @@ export class RoomDO extends DurableObject<Env> {
     const req = msg as Extract<ClientMessage, { clientCmdId: string }>;
     const allowed =
       msg.type === 'command.issue' || msg.type === 'command.correct' || msg.type === 'command.cancel'
-        ? canCommand
-        : isCommander;
+        ? canCommand(att.role)
+        : canAdmin(att.role);
     if (!allowed) return this.reject(ws, 'FORBIDDEN', req.clientCmdId);
     await this.handleRequest(ws, att, req);
   }
@@ -362,7 +364,14 @@ export class RoomDO extends DurableObject<Env> {
     msg: Extract<ClientMessage, { clientCmdId: string }>,
   ): Promise<void> {
     const room = this.room!;
-    const ctx = { now: Date.now(), newId: () => crypto.randomUUID().slice(0, 12) };
+    // issuer comes from the authenticated connection, never from the client payload.
+    const ctx = {
+      now: Date.now(),
+      newId: () => crypto.randomUUID().slice(0, 12),
+      ...(att.role === 'COMMANDER' || att.role === 'SUB_COMMANDER' || att.role === 'OPERATOR'
+        ? { issuer: { role: att.role } }
+        : {}),
+    };
     const run = (s: RoomState): Result => {
       switch (msg.type) {
         case 'command.issue':
@@ -415,13 +424,7 @@ export class RoomDO extends DurableObject<Env> {
     if (!pre || pre.status !== 'OPEN' || normalizeRoomCode(hello.roomCode) !== pre.code) {
       return this.failAndClose(ws, 'ROOM_NOT_FOUND', CLOSE_ROOM);
     }
-    if (hello.role === 'COMMANDER' || hello.role === 'OPERATOR') {
-      const token = hello.role === 'COMMANDER' ? hello.commanderToken : hello.operatorToken;
-      const expected = hello.role === 'COMMANDER' ? pre.commanderTokenHash : pre.operatorTokenHash;
-      if (!token || !timingSafeEqual(await sha256Hex(token), expected)) {
-        return this.failAndClose(ws, 'UNAUTHORIZED', CLOSE_PROTOCOL);
-      }
-    }
+    if (!(await verifyHello(hello, pre))) return this.failAndClose(ws, 'UNAUTHORIZED', CLOSE_PROTOCOL);
     // State may have changed while hashing (room closed, socket closed, duplicate hello).
     const room = this.room;
     if (!room || room.status !== 'OPEN' || ws.readyState !== 1) {
@@ -467,6 +470,8 @@ export class RoomDO extends DurableObject<Env> {
     };
     ws.serializeAttachment(next);
 
+    // Only the COMMANDER keeps the room alive and drives the "commander disconnected" state;
+    // SUB_COMMANDER/OPERATOR connections deliberately have no effect on lifecycle (unchanged).
     if (hello.role === 'COMMANDER') {
       room.lastCommanderSeenAt = Date.now();
       await this.persist();
