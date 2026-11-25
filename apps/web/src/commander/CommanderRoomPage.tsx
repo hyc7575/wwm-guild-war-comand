@@ -1,0 +1,52 @@
+import { Link, useParams } from 'react-router';
+import { Anchor, Stack, Text } from '@mantine/core';
+import { normalizeRoomCode } from '@winds/protocol';
+import { RoomSession } from '../net/RoomSession';
+import { loadRoomTokens } from '../net/session';
+import { DebugCommandPanel } from '../shared/DebugCommandPanel';
+import { NoticeToast } from '../shared/NoticeToast';
+import { RoomOverview } from '../shared/RoomOverview';
+import { StatusBar } from '../shared/StatusBar';
+import { useRoomStore } from '../state/roomStore';
+import { InvitePanel } from './InvitePanel';
+
+/** /c/:code. Placeholder: the F08 commander console replaces the body later. */
+export default function CommanderRoomPage() {
+  const code = normalizeRoomCode(useParams().code ?? '');
+  const tokens = loadRoomTokens(code);
+  if (!tokens.commanderToken) {
+    return (
+      <Stack p="md" maw={560} mx="auto" mt="xl">
+        <Text role="alert" fw={700}>
+          이 브라우저에는 이 방의 메인오더 권한이 없습니다
+        </Text>
+        <Anchor component={Link} to="/">
+          처음으로
+        </Anchor>
+      </Stack>
+    );
+  }
+  return (
+    <RoomSession code={code} role="COMMANDER" token={tokens.commanderToken}>
+      <CommanderBody code={code} operatorToken={tokens.operatorToken} />
+    </RoomSession>
+  );
+}
+
+function CommanderBody({ code, operatorToken }: { code: string; operatorToken?: string }) {
+  const connection = useRoomStore((s) => s.connection);
+  return (
+    <>
+      <StatusBar />
+      {connection === 'REPLACED' && (
+        <Text p="md" fw={700}>
+          다른 탭에서 열렸습니다. 이 탭은 더 이상 명령을 보낼 수 없습니다.
+        </Text>
+      )}
+      <InvitePanel code={code} operatorToken={operatorToken} />
+      <RoomOverview />
+      <DebugCommandPanel />
+      <NoticeToast />
+    </>
+  );
+}

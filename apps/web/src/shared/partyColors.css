@@ -1,0 +1,15 @@
+/* Party color tokens p1..p12. Party.color from the server is one of these names. */
+:root {
+  --p1: #4f9cf7;
+  --p2: #f0a43a;
+  --p3: #4cc38a;
+  --p4: #e5584f;
+  --p5: #a46cf0;
+  --p6: #2fc4c9;
+  --p7: #e86cae;
+  --p8: #b5c93a;
+  --p9: #f07f4f;
+  --p10: #7a8cf0;
+  --p11: #8fd1a6;
+  --p12: #c9a36b;
+}
