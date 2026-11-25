@@ -1,11 +1,12 @@
 import { LIMITS, type Command, type Party, type RoomSettings, type SttFeedOutcome } from '@winds/protocol';
-import { CONTEXT_MAX, CONTEXT_WINDOW_MS, parse, type CommandDraft, type ContextCommand, type Dictionary, type ParseResult } from '@winds/parser';
+import { CALLWORD_FOLLOWUP_MS, CONTEXT_MAX, CONTEXT_WINDOW_MS, extractCallword, parse, type CallwordConfig, type CommandDraft, type ContextCommand, type Dictionary, type ParseResult } from '@winds/parser';
 import type { RequestInput, SendPayload } from '../../net/RoomClient';
 import type { AckInfo } from '../console/IssueTracker';
 import { describeDraft, describePatch } from '../labels';
 import { ACTION_LABEL } from '../../shared/labels';
 import type { MetricsSink } from '../metrics';
 import type { TuningLog } from './tuningLog';
+import { loadCallword } from '../callwordSettings';
 
 export const SUBTITLE_MAX = 5;
 export const FEED_FLUSH_MS = 300;
@@ -67,6 +68,8 @@ export interface PipelineDeps {
   send(msg: SendPayload): boolean;
   getState(): PipelineState;
   getDictionary(): Dictionary;
+  /** Call-word mode settings, read per sentence. Default: localStorage `winds.callword` (off unless enabled). */
+  getCallword?(): CallwordConfig;
   metrics: MetricsSink;
   tuningLog: TuningLog;
   now?: () => number;
@@ -99,6 +102,8 @@ export class CommandPipeline {
   private snap: PipelineSnapshot = { subtitles: [], partial: '', candidates: [] };
   private listeners = new Set<() => void>();
   private lastVoice?: LastVoice;
+  /** Set when a sentence was only the call word; the next final before this time is the command. */
+  private callwordUntil = 0;
   private feedQueue: FeedEntry[] = [];
   private feedTimer: unknown = null;
   private candidateTimers = new Map<string, unknown>();
@@ -139,7 +144,16 @@ export class CommandPipeline {
     if (!text) return;
     const now = this.now();
     const state = this.deps.getState();
-    const results = parse(text, {
+    const gate = this.applyCallword(text, now);
+    if (gate === null) {
+      this.set({
+        partial: '',
+        subtitles: [...this.snap.subtitles, { id: this.uuid(), text, at: now, chips: [] }].slice(-SUBTITLE_MAX),
+      });
+      return;
+    }
+    const parsedText = gate;
+    const results = parse(parsedText, {
       parties: state.parties,
       dictionary: this.deps.getDictionary(),
       lastVoiceCommand: this.resolveLastVoice(state),
@@ -149,8 +163,32 @@ export class CommandPipeline {
 
     const line: SubtitleLine = { id: this.uuid(), text, at: now, chips: [] };
     // Candidates are added after the line so a re-render never shows a candidate without its line.
-    for (const r of results) this.handleResult(r, line, text, opts.endedAt, state.parties, state.commands);
+    for (const r of results) this.handleResult(r, line, parsedText, opts.endedAt, state.parties, state.commands);
     this.set({ partial: '', subtitles: [...this.snap.subtitles, line].slice(-SUBTITLE_MAX) });
+  }
+
+  /**
+   * Call-word gate. Returns the text for the parser, or null when the sentence is dropped
+   * (feed gets "호출어 없음, 무시"; nothing reaches the parser or the tuning log).
+   */
+  private applyCallword(text: string, now: number): string | null {
+    const cfg = this.deps.getCallword?.() ?? loadCallword();
+    if (!cfg.enabled) {
+      this.callwordUntil = 0;
+      return text;
+    }
+    const waiting = now <= this.callwordUntil;
+    this.callwordUntil = 0;
+    const r = extractCallword(text, cfg);
+    if (r.kind === 'COMMAND') return r.text;
+    if (r.kind === 'CALL_ONLY') {
+      this.callwordUntil = now + CALLWORD_FOLLOWUP_MS;
+      this.queueFeed(text, 'DISCARDED', '호출어만 들림, 다음 문장 5초 대기');
+      return null;
+    }
+    if (waiting) return text;
+    this.queueFeed(text, 'DISCARDED', '호출어 없음, 무시');
+    return null;
   }
 
   publishCandidate(id: string): void {

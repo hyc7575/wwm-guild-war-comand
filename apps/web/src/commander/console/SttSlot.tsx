@@ -3,6 +3,7 @@ import { Alert, Badge, Button, Group, NativeSelect, Progress, Stack, Text } from
 import { useRoomStore } from '../../state/roomStore';
 import { useConsole } from './ConsoleProvider';
 import { ENGINE_OPTIONS, SttController, type EngineChoice, type SttSnapshot } from './stt/SttController';
+import { CallwordSetting } from './stt/CallwordSetting';
 import { APP_TITLE, statusView, tabTitle } from './stt/status';
 
 const FAKE_ALLOWED = (() => {
@@ -188,6 +189,7 @@ function SttPanel() {
           )}
         </Alert>
       )}
+      <CallwordSetting />
       <Text size="xs" c="dimmed" data-testid="stt-privacy">
         음성은 이 브라우저 안에서만 처리되고 저장하지 않습니다
       </Text>

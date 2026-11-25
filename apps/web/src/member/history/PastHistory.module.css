@@ -1,0 +1,67 @@
+.wrap {
+  margin-top: 12px;
+  font-size: calc(0.95rem * var(--hud-fs, 1));
+}
+.toggle {
+  min-height: 44px;
+  padding: 0 14px;
+  color: var(--text);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+.h3 {
+  margin: 12px 0 4px;
+  font-size: 1em;
+  color: var(--text-dim);
+}
+.list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 10px;
+  padding: 6px 10px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  background: var(--surface);
+  border-radius: 8px;
+}
+.row[data-status='CANCELLED'] {
+  color: var(--text-dim);
+}
+.time {
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+}
+.tag {
+  padding: 1px 8px;
+  font-size: 0.85em;
+  background: var(--surface-2);
+  border: 1px solid var(--text-dim);
+  border-radius: 999px;
+}
+.transcript {
+  color: var(--text-dim);
+}
+.room {
+  margin: 4px 0;
+}
+.room summary {
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  cursor: pointer;
+}
+.empty,
+.note {
+  margin: 4px 0;
+  color: var(--text-dim);
+}

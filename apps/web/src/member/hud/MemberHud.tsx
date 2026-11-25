@@ -17,6 +17,7 @@ import { useCardEffects } from './useCardEffects';
 import { useMemberHudModel } from './useMemberHudModel';
 import { useMediaQuery, useNow } from './useNow';
 import { useWakeLock } from './useWakeLock';
+import { PastHistory, useHistoryRecorder } from '../history';
 import { CompactHud } from '../pip/CompactHud';
 import { usePipWindow } from '../pip/usePipWindow';
 import styles from './MemberHud.module.css';
@@ -44,6 +45,8 @@ function useAudioBlocked(enabled: boolean): boolean {
 
 export function MemberHud({ onChangeParty }: { onChangeParty(): void }) {
   const m = useMemberHudModel();
+  useHistoryRecorder();
+  const roomCode = useRoomStore((s) => s.roomCode);
   const shareTranscript = useRoomStore((s) => s.settings.shareTranscript);
   const { settings, update } = useHudSettings();
   const now = useNow(1000);
@@ -221,6 +224,7 @@ export function MemberHud({ onChangeParty }: { onChangeParty(): void }) {
                 showTranscript={shareTranscript}
               />
             )}
+            {(wide || historyOpen) && roomCode && <PastHistory roomCode={roomCode} currentIds={new Set(Object.keys(m.commands))} />}
           </section>
         </div>
       )}

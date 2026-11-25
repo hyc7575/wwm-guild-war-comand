@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'react';
+import { HistorySettingsSection } from '../history';
 import { FONT_SCALE, type HudSettings } from './settings';
 import styles from './SettingsDrawer.module.css';
 
@@ -84,6 +85,8 @@ export function SettingsDrawer({ settings, onChange, onClose }: SettingsDrawerPr
           <input type="checkbox" checked={settings.activeFirst} onChange={(e) => onChange({ activeFirst: e.target.checked })} data-testid="opt-active-first" />
           명령 있는 파티 먼저 (8개 이상이면 빈 파티 축소)
         </label>
+
+        <HistorySettingsSection />
 
         <fieldset className={styles.fonts}>
           <legend>글자 크기</legend>
