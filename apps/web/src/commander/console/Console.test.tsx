@@ -14,6 +14,7 @@ beforeAll(() => {
 });
 
 let sent: Array<{ id: string; input: any }>;
+let resent: string[];
 let controller: ConsoleController;
 
 const cmd = (id: string, seq: number, partyIds: string[], action: Command['action'] = 'ATTACK'): Command => ({
@@ -32,6 +33,7 @@ function mount(mode: 'commander' | 'operator' = 'commander', openInvite = false,
 
 beforeEach(() => {
   sent = [];
+  resent = [];
   useRoomStore.getState().reset();
   useRoomStore.setState({
     hasSnapshot: true,
@@ -49,6 +51,10 @@ beforeEach(() => {
         return id;
       },
       send: () => true,
+      resend: (item) => {
+        resent.push(item.clientCmdId);
+        return item.clientCmdId;
+      },
     },
     store: useRoomStore as unknown as ConsoleStore,
     tuningLog: new MemoryTuningLog(),
@@ -194,7 +200,8 @@ describe('Console (commander)', () => {
     mount();
     expect(tid('unsent-list')).toHaveTextContent('전체 대기');
     fireEvent.click(tid('unsent-resend'));
-    expect(sent[0]!.input).toMatchObject({ action: 'HOLD' });
+    expect(resent).toEqual(['u1']); // same clientCmdId, no new request
+    expect(sent).toHaveLength(0);
     expect(useRoomStore.getState().unsent).toHaveLength(0);
   });
 

@@ -26,6 +26,7 @@ function harness(now?: () => number) {
     dismissUnsent() {},
   }));
   const sent: Array<{ id: string; input: any }> = [];
+  const resent: string[] = [];
   const client = {
     request: (input: any) => {
       const id = `r${sent.length + 1}`;
@@ -33,6 +34,10 @@ function harness(now?: () => number) {
       return id;
     },
     send: () => true,
+    resend: (item: any) => {
+      resent.push(item.clientCmdId);
+      return item.clientCmdId as string;
+    },
   };
   const metrics = new SessionMetrics();
   const c = new ConsoleController({
@@ -43,7 +48,7 @@ function harness(now?: () => number) {
     ...(now ? { now } : {}),
   });
   const apply = (msg: any) => useStore.setState((s) => applyServerMessage(s, msg));
-  return { c, sent, useStore, apply, metrics };
+  return { c, sent, resent, useStore, apply, metrics };
 }
 
 describe('selectors', () => {
@@ -59,6 +64,15 @@ describe('selectors', () => {
 });
 
 describe('ConsoleController', () => {
+  it('resend reuses the original clientCmdId instead of issuing a new request', () => {
+    const { c, sent, resent } = harness();
+    const msg = { type: 'command.issue', target: { kind: 'ALL' }, action: 'HOLD', source: 'MANUAL' } as const;
+    c.resend({ clientCmdId: 'u1', createdAt: 0, reason: 'STALE', msg } as any);
+    expect(resent).toEqual(['u1']);
+    expect(sent).toHaveLength(0);
+    expect(c.tracker.get('u1')).toBeDefined();
+  });
+
   it('manual issue sends source MANUAL and counts it', () => {
     const { c, sent, metrics } = harness();
     c.issueManual({ target: { kind: 'PARTIES', partyIds: ['p3'] }, action: 'DEFEND', location: { id: 'RIGHT', label: '우측' } });

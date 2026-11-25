@@ -13,6 +13,8 @@ import { findLastActive } from './selectors';
 
 export interface ConsoleClient {
   request(input: RequestInput): string;
+  /** Re-send an unsent item with its original clientCmdId (server dedupes). Null when unknown. */
+  resend(item: UnsentCommand): string | null;
   send(msg: SendPayload): boolean;
 }
 
@@ -205,7 +207,10 @@ export class ConsoleController {
 
   resend(item: UnsentCommand): void {
     this.o.store.getState().dismissUnsent(item.clientCmdId);
-    this.tracker.request(item.msg, describeRequest(item.msg, this.parties));
+    // Reuse the original clientCmdId: if the server already applied it, the idempotent ack comes back
+    // instead of a duplicate publish.
+    const id = this.o.client.resend(item);
+    if (id) this.tracker.track(id, describeRequest(item.msg, this.parties));
   }
 
   discard(item: UnsentCommand): void {

@@ -7,36 +7,69 @@ import {
 } from '@winds/protocol';
 import { randomRng, randomToken, sha256Hex } from './crypto';
 import type { Env } from './env';
+import {
+  HttpRateLimiter,
+  corsHeaders,
+  isOriginAllowed,
+  parseAllowedOrigins,
+  parseHttpLimit,
+  type LimitKind,
+} from './httpGuard';
 
 export { RoomDO } from './room-do';
 
-const CORS: Record<string, string> = {
-  'access-control-allow-origin': '*',
-  'access-control-allow-methods': 'GET, POST, OPTIONS',
-  'access-control-allow-headers': 'content-type',
-  'access-control-max-age': '86400',
-};
-
-function json(body: unknown, status = 200): Response {
+function json(body: unknown, status = 200, extra: Record<string, string> = {}): Response {
   return new Response(JSON.stringify(body), {
     status,
-    headers: { 'content-type': 'application/json; charset=utf-8', ...CORS },
+    headers: { 'content-type': 'application/json; charset=utf-8', ...extra },
   });
 }
+
+const limiter = new HttpRateLimiter();
 
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
     const path = url.pathname;
     if (!path.startsWith('/api/')) return new Response('Not found', { status: 404 });
-    if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: CORS });
+    const origin = request.headers.get('origin');
+    if (!isOriginAllowed(origin, url.host, parseAllowedOrigins(env.ALLOWED_ORIGINS))) {
+      return json({ error: 'FORBIDDEN_ORIGIN' }, 403, { vary: 'Origin' });
+    }
+    const cors = corsHeaders(origin);
+    const res = await route(request, env, url, cors);
+    if (res.status === 101) return res;
+    try {
+      for (const [k, v] of Object.entries(cors)) res.headers.set(k, v);
+      return res;
+    } catch {
+      // Responses passed through from the Durable Object stub have immutable headers: copy them.
+      const copy = new Response(res.body, res);
+      for (const [k, v] of Object.entries(cors)) copy.headers.set(k, v);
+      return copy;
+    }
+  },
+} satisfies ExportedHandler<Env>;
+
+async function route(request: Request, env: Env, url: URL, cors: Record<string, string>): Promise<Response> {
+    const path = url.pathname;
+    if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: cors });
 
     if (path === '/api/health' && request.method === 'GET') return json({ ok: true });
 
-    if (path === '/api/rooms' && request.method === 'POST') return createRoom(request, env);
+    const limits = parseHttpLimit(env.HTTP_RATE_LIMIT);
+    const ip = request.headers.get('cf-connecting-ip') ?? 'local';
+    const limited = (kind: LimitKind): Response | null => {
+      const retry = limiter.check(ip, kind, limits[kind], Date.now());
+      return retry === 0 ? null : json({ error: 'RATE_LIMITED' }, 429, { 'retry-after': String(retry) });
+    };
+
+    if (path === '/api/rooms' && request.method === 'POST') return limited('create') ?? createRoom(request, env);
 
     const m = /^\/api\/rooms\/([^/]+)(\/ws)?$/.exec(path);
     if (m && request.method === 'GET') {
+      const rl = limited('read');
+      if (rl) return rl;
       const code = normalizeRoomCode(decodeURIComponent(m[1]!));
       if (!isValidRoomCode(code)) return json({ error: 'ROOM_NOT_FOUND' }, 404);
       const stub = env.ROOM.get(env.ROOM.idFromName(code));
@@ -51,8 +84,7 @@ export default {
       return json(await res.json());
     }
     return json({ error: 'NOT_FOUND' }, 404);
-  },
-} satisfies ExportedHandler<Env>;
+}
 
 async function createRoom(request: Request, env: Env): Promise<Response> {
   let body: unknown;

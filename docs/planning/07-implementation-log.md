@@ -255,3 +255,22 @@
 | WebSocket + 정적 자산 | `run_worker_first`로 `/api/*` HTTP가 Worker로 가는 것은 확인했지만, 배포 설정에서 WebSocket 업그레이드는 로컬에서 확인하지 않았다 |
 | 시계 차이 | HUD 경과 시간은 클라이언트 시계와 서버 `issuedAt`의 차이를 그대로 반영한다 |
 | 배포 | 하지 않았다 (멈춤 조건). 절차는 `docs/deploy.md` |
+
+### 배포 설정 결과 (2026-11-26)
+
+§4.2 배포 설정과 검수 #14의 HTTP 부분을 서버에서 처리했다. 코드는 `apps/server/src/httpGuard.ts`, `index.ts`. 상세 절차는 `docs/deploy.md`.
+
+**Origin 정책** (wrangler `vars.ALLOWED_ORIGINS`, 쉼표 목록. `/api/*` HTTP와 WebSocket 업그레이드에 적용)
+
+| 상황 | 결과 |
+|---|---|
+| Origin 헤더 없음 | 허용 (비브라우저, 테스트) |
+| 목록 비어 있음 (개발) | 같은 출처(요청 Host == Origin host) 또는 loopback만 허용 |
+| 목록 있음 (배포) | 목록의 출처만 허용 |
+| 거절 | 403 `FORBIDDEN_ORIGIN` |
+
+CORS 응답은 `*` 대신 허용된 Origin을 되돌리고 `Vary: Origin`을 붙인다. preflight도 같은 검사를 거친다. 이유: `*`는 아무 사이트의 페이지가 방 API와 WebSocket을 쓰게 둔다. 한계: Origin은 브라우저만 지키므로 접근 제어가 아니다. 방 접근 통제는 방 코드·토큰이 한다.
+
+**HTTP 빈도 제한** (`vars.HTTP_RATE_LIMIT`=`생성,조회`, IP별 메모리 고정 1분 창, 초과 429 + Retry-After): `POST /api/rooms` 분당 10, `GET /api/rooms/:code`와 WebSocket 업그레이드는 한 몫으로 분당 60 [제안값]. 개발(`wrangler.jsonc`)은 100000으로 풀었다. 로컬 테스트·E2E가 loopback 한 IP에서 많이 호출하기 때문이다. 이유: 방 코드 대입(검수 #14)을 늦추려는 것이다. 한계: isolate마다 따로 세고 재시작하면 초기화된다. 완전한 방어가 아니며, 완전한 방어는 Cloudflare Rate Limiting 규칙이다. 한 NAT 뒤 30명 동시 입장은 조회 60/분에 걸릴 수 있어 실전 뒤 조정한다.
+
+**검증:** 순수 함수 단위 테스트(`apps/server/test/helpers.test.ts`), 통합 테스트(기본 vars로 개발 정책, 두 번째 서버를 `--var ALLOWED_ORIGINS`, `HTTP_RATE_LIMIT:2,3`으로 띄워 목록 정책·403·429·WebSocket 403/429 확인). 배포 설정(`wrangler.deploy.jsonc`)의 `ALLOWED_ORIGINS` 예시 값은 배포 전에 실제 도메인으로 바꿔야 한다(사람 작업).

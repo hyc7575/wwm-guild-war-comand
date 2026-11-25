@@ -24,7 +24,7 @@ beforeEach(() => {
   useRoomStore.getState().reset();
   useRoomStore.setState({ hasSnapshot: true, roomCode: 'K7M2QX', connection: 'CONNECTED', parties: makeDefaultParties(3) });
   controller = new ConsoleController({
-    client: { request: () => 'r1', send: (m) => (sentMsgs.push(m), true) },
+    client: { request: () => 'r1', resend: () => null, send: (m) => (sentMsgs.push(m), true) },
     store: useRoomStore as unknown as ConsoleStore,
     tuningLog: new MemoryTuningLog(),
   });

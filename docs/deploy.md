@@ -1,6 +1,6 @@
 # 배포 가이드 (Cloudflare, 사람이 직접 실행)
 
-웹(정적 파일)과 방 서버(Worker + Durable Object)를 **한 Worker**로 배포한다. 같은 주소에서 웹, `/api/*`, WebSocket이 모두 나간다. CORS 설정이 필요 없다 (D-10).
+웹(정적 파일)과 방 서버(Worker + Durable Object)를 **한 Worker**로 배포한다. 같은 주소에서 웹, `/api/*`, WebSocket이 모두 나간다. CORS 설정이 필요 없다 (D-10). 그래도 `/api/*`는 `Origin`을 확인한다(아래 "허용 Origin").
 
 ## 구성
 
@@ -22,6 +22,36 @@
 ```sh
 VITE_STT_MODEL_BASE=https://models.example.com/stt pnpm --filter @winds/web build
 ```
+
+## 허용 Origin과 HTTP 빈도 제한
+
+둘 다 `apps/server/src/httpGuard.ts`, 설정은 wrangler `vars`다. `/api/*` HTTP와 WebSocket 업그레이드에 적용한다. `/api/health`와 preflight(OPTIONS)는 빈도 제한에서 뺀다.
+
+### ALLOWED_ORIGINS
+
+쉼표 목록(예: `https://winds.example.com,https://www.example.com`). 배포 전에 `wrangler.deploy.jsonc`의 예시 값을 실제 도메인으로 **반드시 바꾼다.** 개발용 `wrangler.jsonc`는 빈 값이다.
+
+| 상황 | 결과 |
+|---|---|
+| `Origin` 헤더 없음 (curl, 서버 간 호출, 테스트) | 허용 |
+| 목록이 비어 있음 | 요청 Host와 Origin의 host가 같거나 loopback(`localhost`, `127.0.0.1`, `[::1]`)만 허용 |
+| 목록이 있음 | 목록에 있는 출처만 허용 (대소문자·끝 슬래시 무시). loopback도 목록에 없으면 거절 |
+| 거절 | 403 `FORBIDDEN_ORIGIN` |
+
+허용된 응답에는 `Access-Control-Allow-Origin: <요청 Origin>`과 `Vary: Origin`을 붙인다(`*` 아님). 한계: `Origin`은 브라우저만 지킨다. 비브라우저 클라이언트는 헤더를 위조하거나 생략할 수 있어, 이것은 다른 사이트의 웹 페이지가 내 서버를 쓰는 것을 막을 뿐 접근 제어가 아니다. 방 접근은 여전히 방 코드와 토큰이다.
+
+### HTTP 빈도 제한 (방 코드 대입 방지)
+
+`HTTP_RATE_LIMIT`=`<생성/분>,<조회/분>`. IP(`CF-Connecting-IP`, 없으면 `local`)별 고정 1분 창이다. 초과하면 429와 `Retry-After`(초).
+
+| 대상 | 배포 값 | 개발 값(`wrangler.jsonc`) |
+|---|---|---|
+| `POST /api/rooms` | 분당 10 | 100000 |
+| `GET /api/rooms/:code` + WebSocket 업그레이드 (한 몫으로 합산) | 분당 300 | 100000 |
+
+개발 값이 큰 이유: 로컬 테스트와 E2E는 전부 loopback 한 IP라 많은 연결이 한도에 걸린다. 한도 수치는 제안값이다. 같은 NAT(길드원이 한 공유기 뒤)에서 30명이 입장하면 조회 60/분에 걸린다. 그래서 배포 기본값을 300으로 올렸다.
+
+**한계:** 카운터는 Worker isolate 메모리에 있다. isolate마다 따로 세고 재시작하면 초기화되므로, 방 코드 대입을 늦출 뿐 완전한 방어가 아니다. 완전한 방어는 Cloudflare Rate Limiting 규칙(대시보드 → Security → WAF → Rate limiting rules, 경로 `/api/rooms*`)을 앞단에 두는 것이다. 이 코드는 그 규칙이 없을 때의 최소 방어선이다. 방 코드는 32^6(약 10억) 경우이고 방은 4시간 만에 사라진다.
 
 ## sherpa wasm과 모델 분리
 

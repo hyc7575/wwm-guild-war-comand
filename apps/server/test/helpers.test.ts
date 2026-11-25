@@ -172,3 +172,55 @@ describe('review fixes: alarm multiplexing', () => {
     expect(helloExpired(0, 10_000)).toBe(true);
   });
 });
+
+import { HttpRateLimiter, corsHeaders, isOriginAllowed, parseAllowedOrigins, parseHttpLimit } from '../src/httpGuard';
+
+describe('origin policy', () => {
+  it('parses the list', () => {
+    expect(parseAllowedOrigins(' https://A.com/ , ,https://b.com')).toEqual(['https://a.com', 'https://b.com']);
+    expect(parseAllowedOrigins(undefined)).toEqual([]);
+  });
+  it('no Origin header is allowed', () => {
+    expect(isOriginAllowed(null, 'x.com', [])).toBe(true);
+    expect(isOriginAllowed(null, 'x.com', ['https://a.com'])).toBe(true);
+  });
+  it('empty list: same origin or loopback only', () => {
+    expect(isOriginAllowed('https://x.com', 'x.com', [])).toBe(true);
+    expect(isOriginAllowed('http://localhost:5180', 'localhost:8798', [])).toBe(true);
+    expect(isOriginAllowed('http://127.0.0.1:5173', 'x.com', [])).toBe(true);
+    expect(isOriginAllowed('http://[::1]:5173', 'x.com', [])).toBe(true);
+    expect(isOriginAllowed('https://evil.com', 'x.com', [])).toBe(false);
+    expect(isOriginAllowed('https://x.com:8443', 'x.com', [])).toBe(false);
+    expect(isOriginAllowed('not a url', 'x.com', [])).toBe(false);
+    expect(isOriginAllowed('null', 'x.com', [])).toBe(false);
+  });
+  it('list: only listed origins', () => {
+    const l = ['https://a.com'];
+    expect(isOriginAllowed('https://a.com', 'x.com', l)).toBe(true);
+    expect(isOriginAllowed('https://A.com', 'x.com', l)).toBe(true);
+    expect(isOriginAllowed('http://localhost:5173', 'localhost:5173', l)).toBe(false);
+    expect(isOriginAllowed('https://b.com', 'x.com', l)).toBe(false);
+  });
+  it('cors headers echo the origin and vary', () => {
+    expect(corsHeaders('https://a.com')['access-control-allow-origin']).toBe('https://a.com');
+    expect(corsHeaders('https://a.com').vary).toBe('Origin');
+    expect(corsHeaders(null)['access-control-allow-origin']).toBeUndefined();
+  });
+});
+
+describe('http rate limit', () => {
+  it('parses limits with fallback', () => {
+    expect(parseHttpLimit('5,20')).toEqual({ create: 5, read: 20 });
+    expect(parseHttpLimit(undefined)).toEqual({ create: 10, read: 60 });
+    expect(parseHttpLimit('x,-1')).toEqual({ create: 10, read: 60 });
+  });
+  it('counts per ip and kind per window, with Retry-After', () => {
+    const l = new HttpRateLimiter(60_000);
+    expect(l.check('a', 'create', 2, 0)).toBe(0);
+    expect(l.check('a', 'create', 2, 1000)).toBe(0);
+    expect(l.check('a', 'create', 2, 2000)).toBe(58);
+    expect(l.check('b', 'create', 2, 2000)).toBe(0);
+    expect(l.check('a', 'read', 2, 2000)).toBe(0);
+    expect(l.check('a', 'create', 2, 60_000)).toBe(0);
+  });
+});

@@ -98,11 +98,12 @@ async function api(path: string, init?: RequestInit) {
   return fetch(`${BASE}${path}`, init);
 }
 
-async function startWrangler(): Promise<ChildProcess> {
+async function startWrangler(port = PORT, extraArgs: string[] = []): Promise<ChildProcess> {
+  const base = `http://127.0.0.1:${port}`;
   const persist = mkdtempSync(join(tmpdir(), 'winds-wrangler-'));
   const child = spawn(
     join(root, 'node_modules/.bin/wrangler'),
-    ['dev', '--port', String(PORT), '--inspector-port', String(9339 + PORT - 8799), '--local', '--persist-to', persist],
+    ['dev', '--port', String(port), '--inspector-port', String(9339 + port - 8799), '--local', '--persist-to', persist, ...extraArgs],
     {
       cwd: root,
       env: { ...process.env, WRANGLER_SEND_METRICS: 'false', CI: '1' },
@@ -117,7 +118,7 @@ async function startWrangler(): Promise<ChildProcess> {
   while (Date.now() < deadline) {
     if (child.exitCode !== null) throw new Error('wrangler exited early:\n' + log);
     try {
-      const r = await fetch(`${BASE}/api/health`);
+      const r = await fetch(`${base}/api/health`);
       if (r.ok) return child;
     } catch {
       /* not up yet */
@@ -158,7 +159,7 @@ async function main() {
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ parties: [{ name: '돌격' }, { name: '수비' }, {}] }),
     });
-    check(created.status === 201 && created.headers.get('access-control-allow-origin') === '*', 'create room 201 + CORS');
+    check(created.status === 201 && created.headers.get('vary') === 'Origin', 'create room 201 + Vary: Origin');
     const { code, commanderToken, operatorToken, subCommanderToken } = (await created.json()) as any;
     check(/^[A-HJKMNP-Z2-9]{6}$/.test(code), `room code ${code}`);
     const info = await api(`/api/rooms/${code.toLowerCase()}`);
@@ -442,10 +443,68 @@ async function main() {
     await ghost.waitClosed(5000);
     check(ghost.closeCode === 4009, 'stale commander socket closed (4009)');
 
+    await guardTests();
+
     console.log(`\nALL PASSED (${passed} checks)`);
   } finally {
     for (const c of clients) try { c.close(); } catch { /* ignore */ }
     killWrangler(child);
+  }
+}
+
+/** Origin policy and HTTP rate limit, against a second server with strict vars. */
+async function guardTests() {
+  console.log('dev policy (default vars)');
+  const roomBody = JSON.stringify({ parties: [{}, {}] });
+  const post = (base: string, origin?: string) =>
+    fetch(`${base}/api/rooms`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', ...(origin ? { origin } : {}) },
+      body: roomBody,
+    });
+  check((await post(BASE, 'https://evil.example')).status === 403, 'dev: foreign Origin -> 403');
+  const lo = await post(BASE, 'http://localhost:5173');
+  check(lo.status === 201 && lo.headers.get('access-control-allow-origin') === 'http://localhost:5173', 'dev: loopback Origin allowed, echoed');
+  check(lo.headers.get('vary') === 'Origin', 'dev: Vary: Origin');
+  check((await post(BASE, BASE)).status === 201, 'dev: same-origin allowed');
+  check((await post(BASE)).status === 201, 'dev: no Origin allowed');
+  const pre = await fetch(`${BASE}/api/rooms`, { method: 'OPTIONS', headers: { origin: 'http://localhost:5173' } });
+  check(pre.status === 204 && pre.headers.get('access-control-allow-methods')?.includes('POST') === true, 'dev: preflight 204');
+  check((await fetch(`${BASE}/api/rooms`, { method: 'OPTIONS', headers: { origin: 'https://evil.example' } })).status === 403, 'dev: preflight from foreign Origin -> 403');
+  check((await fetch(`${BASE}/api/rooms/ABCDEF`, { headers: { origin: 'https://evil.example' } })).status === 403, 'dev: GET room foreign Origin -> 403');
+  const wsStatus = (url: string, origin: string) =>
+    new Promise<number>((res) => {
+      const ws = new WebSocket(url, { headers: { origin } });
+      ws.on('unexpected-response', (_q, r) => (res(r.statusCode ?? 0), ws.terminate()));
+      ws.on('open', () => (res(101), ws.close()));
+      ws.on('error', () => undefined);
+    });
+  const created = (await (await post(BASE)).json()) as any;
+  check((await wsStatus(`${WS_BASE}/api/rooms/${created.code}/ws`, 'https://evil.example')) === 403, 'dev: WebSocket upgrade foreign Origin -> 403');
+  check((await wsStatus(`${WS_BASE}/api/rooms/${created.code}/ws`, 'http://localhost:5173')) === 101, 'dev: WebSocket upgrade loopback Origin -> 101');
+
+  console.log('strict vars (ALLOWED_ORIGINS list, HTTP_RATE_LIMIT 2,3)');
+  const port2 = PORT + 10;
+  const b2 = `http://127.0.0.1:${port2}`;
+  const child2 = await startWrangler(port2, ['--var', 'ALLOWED_ORIGINS:https://good.example', '--var', 'HTTP_RATE_LIMIT:2,3']);
+  try {
+    check((await post(b2, 'http://localhost:5173')).status === 403, 'list: loopback not in list -> 403');
+    const ok = await post(b2, 'https://good.example');
+    check(ok.status === 201 && ok.headers.get('access-control-allow-origin') === 'https://good.example', 'list: listed Origin allowed');
+    const room = (await ok.json()) as any;
+    check((await fetch(`${b2}/api/rooms/${room.code}`, { headers: { origin: 'https://good.example' } })).status === 200, 'list: GET room allowed (read 1/3)');
+    check((await wsStatus(`ws://127.0.0.1:${port2}/api/rooms/${room.code}/ws`, 'https://evil.example')) === 403, 'list: WebSocket foreign Origin -> 403');
+    check((await wsStatus(`ws://127.0.0.1:${port2}/api/rooms/${room.code}/ws`, 'https://good.example')) === 101, 'list: WebSocket listed Origin -> 101 (read 2/3)');
+    check((await post(b2)).status === 201, 'rate: create 2/2');
+    const over = await post(b2);
+    check(over.status === 429 && Number(over.headers.get('retry-after')) >= 1, 'rate: create 3rd -> 429 + Retry-After');
+    check((await fetch(`${b2}/api/rooms/${room.code}`)).status === 200, 'rate: read 3/3');
+    const over2 = await fetch(`${b2}/api/rooms/${room.code}`);
+    check(over2.status === 429, 'rate: GET room 4th -> 429');
+    check((await wsStatus(`ws://127.0.0.1:${port2}/api/rooms/${room.code}/ws`, 'https://good.example')) === 429, 'rate: WebSocket upgrade over limit -> 429');
+    check((await fetch(`${b2}/api/health`)).status === 200, 'health is not limited');
+  } finally {
+    killWrangler(child2);
   }
 }
 

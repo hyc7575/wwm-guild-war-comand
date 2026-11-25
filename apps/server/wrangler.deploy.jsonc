@@ -8,6 +8,13 @@
   "main": "src/index.ts",
   "compatibility_date": "2026-11-01",
   "dev": { "port": 8787 },
+  "vars": {
+    // Comma-separated allowed Origins. CHANGE to your deployed domain(s) before deploying.
+    // Empty would fall back to same origin or loopback only (fine for the single-Worker setup, but be explicit).
+    "ALLOWED_ORIGINS": "https://winds-command.example.workers.dev",
+    // Per IP per minute: POST /api/rooms, GET room + WebSocket upgrade. Not a complete defense (see docs/deploy.md).
+    "HTTP_RATE_LIMIT": "10,300"
+  },
   // Only /api/* runs the Worker first (rooms + WebSocket). Everything else is served from assets,
   // and unknown paths fall back to index.html (SPA routes such as /r/ABC123, /guide).
   // Per-file limit is 25 MiB (sherpa wasm ~15.7MB is fine); STT models are NOT deployed (loaded from Hugging Face).

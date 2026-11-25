@@ -93,5 +93,8 @@ export function partyNumbersLabel(parties: Party[], ids: string[]): string {
     .map((id) => partyById(parties, id)?.number)
     .filter((n): n is number => n !== undefined)
     .sort((a, b) => a - b);
-  return nums.length ? `${nums.join('·')}파티` : '?';
+  // Commands keep only partyIds, so a deleted party's number is unrecoverable.
+  if (!nums.length) return ids.length ? '(삭제된 파티)' : '?';
+  const label = `${nums.join('·')}파티`;
+  return nums.length < ids.length ? `${label} 외 삭제된 파티` : label;
 }
