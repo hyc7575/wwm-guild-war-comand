@@ -1,7 +1,6 @@
 import { test, expect } from '@playwright/test';
 import { createRoom, expectCard, issueManual, joinMember, newPerson } from './helpers';
 
-// NOTE: written before the web wiring (/s/:code) landed; not run yet.
 test('9. 서브오더: 링크로 접속해 명령을 내면 동맹원 HUD에 서브오더 라벨', async ({ browser }) => {
   const cmd = await createRoom(browser);
   const m1 = await joinMember(browser, cmd.code, 1);

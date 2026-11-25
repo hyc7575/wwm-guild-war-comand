@@ -88,6 +88,9 @@ interface CompiledDict {
 
 const ACTION_ORDER: Action[] = ['GATHER', 'MOVE', 'ATTACK', 'DEFEND', 'RETREAT', 'SUPPORT', 'HOLD'];
 
+/** 단독 발화일 때만 취소로 인정하는 표현 */
+const GENERIC_CANCEL = new Set(['취소해', '명령취소']);
+
 const dictCache = new WeakMap<Dictionary, CompiledDict>();
 
 function compileDict(d: Dictionary): CompiledDict {
@@ -163,6 +166,8 @@ interface Mention {
   value: string; // partyId | 'ALL' | Action | locationId | marker
   weak: boolean;
   label?: string;
+  /** 파티 뒤에 한테/에게/쪽으로가 붙은 경우: 행동 주체가 아니라 도착지일 수 있다 */
+  dest?: boolean;
 }
 
 interface Cand {
@@ -298,6 +303,7 @@ function collectMentions(t: string, parties: readonly Party[], cd: CompiledDict,
       value: x.value,
       weak: x.weak,
       label: x.kind === 'location' ? cd.locationLabel.get(x.value) : undefined,
+      dest: x.kind === 'party' && /^(?:한테|에게|쪽으로)/.test(c.slice(x.ce)),
     };
   });
 }
@@ -382,6 +388,8 @@ interface Built {
   weak: boolean;
   filled: boolean;
   reordered: boolean;
+  /** 전체와 파티가 함께 나왔거나 파티가 도착지 표현이라 대상이 불확실하다 */
+  mixed: boolean;
   unknown?: string;
   evidence: Match[];
 }
@@ -412,7 +420,19 @@ function buildClause(cl: Clause): Built {
   const conflictL = uniq(locMs.map((m) => m.value)).length > 1;
 
   // 대상
-  const tms = ms.filter((m) => m.kind === 'party' || m.kind === 'all');
+  let tms = ms.filter((m) => m.kind === 'party' || m.kind === 'all');
+  let mixed = false;
+  if (action !== 'SUPPORT') {
+    // "다들 1파티 쪽으로 모여": 파티+한테/에게/쪽으로는 대상이 아니다
+    if (tms.some((m) => m.dest)) {
+      tms = tms.filter((m) => !m.dest);
+      mixed = true;
+    }
+    // 전체와 파티가 섞이면 어느 쪽이 대상인지 모른다
+    // ("1파티 2파티 전원 모여"처럼 전체가 파티 뒤에서 덧붙는 말은 제외)
+    const firstAll = tms.find((m) => m.kind === 'all');
+    if (firstAll && tms.some((m) => m.kind === 'party' && m.cs > firstAll.cs)) mixed = true;
+  }
   const partyMs = tms.filter((m) => m.kind === 'party');
   let target: Target | undefined;
   let supportIds: PartyId[] | undefined;
@@ -458,6 +478,7 @@ function buildClause(cl: Clause): Built {
     weak,
     filled,
     reordered: cl.reordered,
+    mixed,
     unknown: unknown?.value,
     evidence,
   };
@@ -530,17 +551,41 @@ export function parse(text: string, ctx: ParseContext): ParseResult[] {
   const t = normalize(text, d);
   if (!t) return [{ kind: 'NONE', reason: '빈 발화' }];
 
-  // 취소
+  // 부정 표현("하지마", "안 돼", "중지", "금지")은 반대 뜻이라 명령으로 발행하지 않는다
+  if (/하지마|하지말|안돼|안되|중지|금지/.test(t.replace(/ /g, ''))) {
+    const hasCancel = cd.cancel.some((p) => t.replace(/ /g, '').includes(p));
+    if (!hasCancel) return [{ kind: 'NONE', reason: '부정 표현' }];
+  }
+
+  const all = collectMentions(t, ctx.parties, cd, d);
+
+  // 취소: 긴 표현부터. "취소해"·"명령 취소"는 단독 발화일 때만, 나머지는 같이 말한 대상·행동이 직전 명령과 같을 때만 인정한다.
   {
     const compact = t.replace(/ /g, '');
     const map: number[] = [];
     for (let i = 0; i < t.length; i++) if (t[i] !== ' ') map.push(i);
-    for (const phrase of cd.cancel) {
+    const phrases = [...cd.cancel].sort((a, b) => b.length - a.length);
+    for (const phrase of phrases) {
       const i = compact.indexOf(phrase);
       if (i < 0) continue;
       if (!ctx.lastVoiceCommand) return [{ kind: 'NONE', reason: 'no previous command' }];
       const start = map[i] ?? 0;
       const end = (map[i + phrase.length - 1] ?? 0) + 1;
+      const rest = compact.slice(0, i) + compact.slice(i + phrase.length);
+      const standalone = /^(?:요|줘|주세요|좀|제발|해|해줘|해주세요|라|좀요)*$/.test(rest);
+      if (!standalone) {
+        if (GENERIC_CANCEL.has(phrase)) return [{ kind: 'NONE', reason: '취소는 단독 발화일 때만' }];
+        const others = all.filter((m) => m.kind !== 'marker' && !(m.start < end && start < m.end));
+        const b = buildClause({ ms: others, borrowed: [], reordered: false });
+        const lc = ctx.lastVoiceCommand.command;
+        const same =
+          !b.unknown &&
+          (b.target || b.action || b.location) &&
+          (!b.target || (lc.target !== undefined && sameTarget(b.target, lc.target))) &&
+          (!b.action || b.action === lc.action) &&
+          (!b.location || b.location.id === lc.location?.id);
+        if (!same) return [{ kind: 'NONE', reason: '취소 대상이 직전 명령과 다름' }];
+      }
       return [
         {
           kind: 'CANCEL',
@@ -551,7 +596,6 @@ export function parse(text: string, ctx: ParseContext): ParseResult[] {
     }
   }
 
-  const all = collectMentions(t, ctx.parties, cd, d);
   const markers = all.filter((m) => m.kind === 'marker');
   let body = all.filter((m) => m.kind !== 'marker');
   let capMedium = false;
@@ -574,8 +618,19 @@ export function parse(text: string, ctx: ParseContext): ParseResult[] {
       // 앞쪽에 내용이 있었다면(무엇을 부정하는지 모르므로) 확신도는 중간으로 제한한다.
       body = after;
       capMedium = before.length > 0 && markers.some((m) => m.value !== '아니');
+    } else if (before.length > 0) {
+      // "1파티 공격 말고": 정정어로 끝나 뒤에 슬롯이 없으면 앞부분은 부정된 내용이다
+      return [{ kind: 'NONE', reason: '정정어 뒤에 내용 없음 (앞부분은 부정됨)' }];
     }
   }
+
+  // 띄어 쓴 한/두/세/네 파티는 개수 표현이라 어느 파티인지 모른다
+  // ("두 파티 쳐"처럼 단순한 번호 표현은 그대로 둔다. "…만"이거나 전체 표현이 함께 나올 때만)
+  if (
+    /(?:^|\s)(?:한|두|세|네)\s+(?:파티|팟)/u.test(text.normalize('NFKC')) &&
+    (/(?:한|두|세|네)\s+(?:파티|팟)\s*만/u.test(text.normalize('NFKC')) || all.some((m) => m.kind === 'all'))
+  )
+    capMedium = true;
 
   // "1파티 빼고", "제외": 제외 표현이 있으면 대상 해석을 믿을 수 없다
   if (/빼고|제외|빼면|말구/.test(t.replace(/ /g, ''))) capMedium = true;
@@ -605,7 +660,7 @@ function issue(ms: Mention[], ctx: ParseContext): ParseResult[] {
     const targetless = !b.target;
     const supportMissing = b.action === 'SUPPORT' && !b.supportPartyIds && !b.location;
     const high =
-      !b.weak && !b.conflict && !b.filled && !b.reordered && !supportMissing && (!targetless || asAll);
+      !b.weak && !b.conflict && !b.filled && !b.reordered && !b.mixed && !supportMissing && (!targetless || asAll);
     const draft: CommandDraft = { target: b.target ?? { kind: 'ALL' }, action: b.action };
     if (b.location) draft.location = b.location;
     if (b.supportPartyIds) draft.supportPartyIds = b.supportPartyIds;

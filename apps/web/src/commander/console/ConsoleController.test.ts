@@ -80,6 +80,27 @@ describe('ConsoleController', () => {
     expect(metrics.snapshot().issuedManual).toBe(1);
   });
 
+  it('manual SUPPORT sends supportPartyIds; describeDraft shows the target', () => {
+    const { c, sent } = harness();
+    c.issueManual({ target: { kind: 'PARTIES', partyIds: ['p2'] }, action: 'SUPPORT', supportPartyIds: ['p3'] });
+    expect(sent[0]!.input).toMatchObject({ type: 'command.issue', action: 'SUPPORT', supportPartyIds: ['p3'] });
+    expect(c.tracker.get(sent[0]!.id)?.label).toBe('2파티 지원 →3파티');
+  });
+
+  it('manual issue with correctsId sends command.correct', () => {
+    const { c, sent } = harness();
+    c.issueManual({ target: { kind: 'ALL' }, action: 'MOVE', correctsId: 'C1' });
+    expect(sent[0]!.input).toMatchObject({ type: 'command.correct', correctsId: 'C1', source: 'MANUAL' });
+  });
+
+  it('text "2파티 3파티 지원" previews and issues with the support target', () => {
+    const { c, sent } = harness();
+    const prev = c.previewText('2파티 3파티 지원');
+    expect(prev.labels).toEqual(['2파티 지원 →3파티']);
+    c.issueText('2파티 3파티 지원');
+    expect(sent[0]!.input).toMatchObject({ supportPartyIds: ['p3'] });
+  });
+
   it('cancelLast walks back through commands even before cancel events arrive', () => {
     const { c, sent, useStore } = harness();
     useStore.setState({

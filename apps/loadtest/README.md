@@ -14,7 +14,7 @@ pnpm --filter @winds/loadtest run load --url http://localhost:8787 --members 30 
 
 - 중계 지연 = 동맹원 수신 시각 - 메인오더 전송 시각 (같은 프로세스의 `performance.now()`). p50/p95/p99/max. 목표 p95 <= 200ms (P-7, NFR-F04-1).
 - ack 지연, 연결 끊김·오류 수, 모든 동맹원이 모든 이벤트를 순서대로 받았는지.
-- 끝에서 새 접속자의 `welcome` 크기(스냅샷, 명령 50개 시 <= 32KB, NFR-F04-4). 60명 방은 가득 차므로 한 자리를 비우고 잰다.
+- 끝에서 `welcome` 크기(스냅샷 <= 32KB, NFR-F04-4)를 최악 조건으로 잰다. 파티 12개(이름·별칭 최대 길이), 명령 50개를 전부 VOICE + 원문 200자(한글)로 채우고, 원문이 항상 보이는 COMMANDER 역할로 접속한다. 메인오더 자리를 쓰므로 기존 메인오더 연결은 의도적으로 먼저 닫는다.
 - Durable Object 요청 수 추정 (06 D-3: `ceil(들어온 메시지/20) + 연결 수`). 앱 ping은 `setWebSocketAutoResponse`라 세지 않는다. 가정(30명, 접속 3회, 시간당 명령 600개)은 코드 상단의 `EST_*`.
 - JSON 리포트는 `reports/` (gitignore).
 

@@ -1,3 +1,4 @@
+import { useEffect, useRef } from 'react';
 import { FONT_SCALE, type HudSettings } from './settings';
 import styles from './SettingsDrawer.module.css';
 
@@ -9,9 +10,45 @@ export interface SettingsDrawerProps {
 
 /** Member-local settings (F05). Presentational. */
 export function SettingsDrawer({ settings, onChange, onClose }: SettingsDrawerProps) {
+  const drawerRef = useRef<HTMLElement>(null);
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
+
+  // Modal behavior: move focus in, close on Esc, keep Tab inside, give focus back on close.
+  useEffect(() => {
+    const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const drawer = drawerRef.current;
+    const focusables = () =>
+      drawer ? Array.from(drawer.querySelectorAll<HTMLElement>('input:not([disabled]), button:not([disabled])')) : [];
+    (focusables()[0] ?? drawer)?.focus();
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        onCloseRef.current();
+      } else if (e.key === 'Tab') {
+        const items = focusables();
+        const first = items[0];
+        const last = items[items.length - 1];
+        if (!first || !last) return;
+        if (e.shiftKey && document.activeElement === first) {
+          e.preventDefault();
+          last.focus();
+        } else if (!e.shiftKey && document.activeElement === last) {
+          e.preventDefault();
+          first.focus();
+        }
+      }
+    };
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('keydown', onKey);
+      if (opener?.isConnected) opener.focus();
+    };
+  }, []);
+
   return (
     <div className={styles.backdrop} onClick={onClose}>
-      <aside className={styles.drawer} role="dialog" aria-modal="true" aria-label="설정" data-testid="settings-drawer" onClick={(e) => e.stopPropagation()}>
+      <aside ref={drawerRef} tabIndex={-1} className={styles.drawer} role="dialog" aria-modal="true" aria-label="설정" data-testid="settings-drawer" onClick={(e) => e.stopPropagation()}>
         <h2 className={styles.title}>설정</h2>
 
         <label className={styles.row}>
@@ -46,7 +83,7 @@ export function SettingsDrawer({ settings, onChange, onClose }: SettingsDrawerPr
 
         <fieldset className={styles.fonts}>
           <legend>글자 크기</legend>
-          {(['작게', '보통', '크게'] as const).map((label, i) => (
+          {(['보통', '크게', '아주 크게'] as const).map((label, i) => (
             <button
               key={label}
               type="button"

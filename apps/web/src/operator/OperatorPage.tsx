@@ -56,7 +56,7 @@ function OperatorBody({ code, label }: { code: string; label: string }) {
   return (
     <>
       <StatusBar />
-      <ConsoleProvider>
+      <ConsoleProvider mode="operator">
         <Console mode="operator" roleLabel={label} code={code} />
       </ConsoleProvider>
       <NoticeToast />

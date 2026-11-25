@@ -52,7 +52,7 @@ function CommanderBody({ code, operatorToken, subCommanderToken, openInvite }: {
           다른 탭에서 열렸습니다. 이 탭은 더 이상 명령을 보낼 수 없습니다.
         </Text>
       )}
-      <ConsoleProvider>
+      <ConsoleProvider mode="commander">
         <ClosedSummary />
         <Console mode="commander" code={code} operatorToken={operatorToken} subCommanderToken={subCommanderToken} openInvite={openInvite} />
       </ConsoleProvider>

@@ -6,20 +6,28 @@ export type CloseReason = 'COMMANDER_CLOSED' | 'EXPIRED' | 'COMMANDER_ABSENT';
 export function nextAlarmAt(
   s: { expiresAt: number; lastCommanderSeenAt: number },
   commanderOnline: boolean,
+  graceUntil = 0,
 ): number {
-  return commanderOnline
-    ? s.expiresAt
-    : Math.min(s.expiresAt, s.lastCommanderSeenAt + LIMITS.commanderAbsentCloseMs);
+  return commanderOnline ? s.expiresAt : Math.min(s.expiresAt, absentDeadline(s, graceUntil));
 }
+
+/**
+ * When a room with no commander is closed. `graceUntil` (instance start + restartGraceMs) is a floor:
+ * a freshly started instance has no sockets yet, so a stale lastCommanderSeenAt must not close the room
+ * before the commander's client had a chance to reconnect.
+ */
+const absentDeadline = (s: { lastCommanderSeenAt: number }, graceUntil: number): number =>
+  Math.max(s.lastCommanderSeenAt + LIMITS.commanderAbsentCloseMs, graceUntil);
 
 /** Which close reason (if any) applies at `now`. */
 export function dueCloseReason(
   s: { expiresAt: number; lastCommanderSeenAt: number },
   commanderOnline: boolean,
   now: number,
+  graceUntil = 0,
 ): CloseReason | null {
   if (now >= s.expiresAt) return 'EXPIRED';
-  if (!commanderOnline && now >= s.lastCommanderSeenAt + LIMITS.commanderAbsentCloseMs) {
+  if (!commanderOnline && now >= absentDeadline(s, graceUntil)) {
     return 'COMMANDER_ABSENT';
   }
   return null;
@@ -33,6 +41,8 @@ export interface AlarmPlanInput {
   /** Earliest `connectedAt` among sockets that have not finished hello, or null. */
   oldestPendingHelloAt: number | null;
   now: number;
+  /** See absentDeadline. */
+  graceUntil?: number;
 }
 
 /**
@@ -40,7 +50,7 @@ export interface AlarmPlanInput {
  * commander liveness tick (only while a commander socket exists) and hello timeout.
  */
 export function planAlarm(i: AlarmPlanInput): number {
-  let at = nextAlarmAt(i, i.commanderOnline);
+  let at = nextAlarmAt(i, i.commanderOnline, i.graceUntil ?? 0);
   if (i.commanderOnline) at = Math.min(at, i.now + LIMITS.commanderLivenessTickMs);
   if (i.oldestPendingHelloAt !== null) at = Math.min(at, i.oldestPendingHelloAt + LIMITS.helloTimeoutMs);
   return Math.max(at, i.now + 1);

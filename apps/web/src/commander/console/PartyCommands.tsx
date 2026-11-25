@@ -1,7 +1,7 @@
 import { Badge, Button, Group, Stack, Text } from '@mantine/core';
 import { useShallow } from 'zustand/react/shallow';
 import { selectCurrentCommand, useRoomStore } from '../../state/roomStore';
-import { ACTION_LABEL, partyLabel, targetLabel } from '../../shared/labels';
+import { ACTION_LABEL, ISSUER_LABEL, partyLabel, partyNumbersLabel, targetLabel } from '../../shared/labels';
 import { partyColorStyle } from '../../shared/partyColor';
 import { useConsole } from './ConsoleProvider';
 import { findCurrentAllCommand } from './selectors';
@@ -31,7 +31,13 @@ export function PartyCommands() {
           <div className={styles.rowBody}>
             <Text fw={700}>
               전체 {ACTION_LABEL[all.action]} {all.location?.label ?? ''}
+              {all.action === 'SUPPORT' && all.supportPartyIds?.length ? ` →${partyNumbersLabel(parties, all.supportPartyIds)}` : ''}
             </Text>
+            {all.issuer && (
+              <Text size="xs" c="dimmed">
+                {ISSUER_LABEL[all.issuer.role]}
+              </Text>
+            )}
             <Text size="xs" c="dimmed">
               {elapsedText(all.issuedAt, now)}
             </Text>
@@ -56,7 +62,13 @@ export function PartyCommands() {
                 <Group gap={6}>
                   <Text>
                     {ACTION_LABEL[cmd.action]} {cmd.location?.label ?? ''}
+                    {cmd.action === 'SUPPORT' && cmd.supportPartyIds?.length ? ` →${partyNumbersLabel(parties, cmd.supportPartyIds)}` : ''}
                   </Text>
+                  {cmd.issuer && (
+                    <Badge variant="dot" size="xs" data-testid={`party-row-issuer-${p.number}`}>
+                      {ISSUER_LABEL[cmd.issuer.role]}
+                    </Badge>
+                  )}
                   {cmd.target.kind === 'PARTIES' && cmd.target.partyIds.length > 1 && (
                     <Badge variant="outline" size="xs">
                       {targetLabel(cmd.target, parties)}

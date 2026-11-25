@@ -19,12 +19,13 @@ export interface SessionSummary {
   /** Keyed by party NUMBER (not id), the way the commander thinks of parties. */
   peakByParty: Record<string, number>;
   /**
-   * `byRole` counts command.issued events by issuer.role only (never the local request metrics).
+   * `voice` counts command.issued/corrected events whose source is VOICE; `byRole` counts command.issued events by issuer.role.
+   * Neither uses local request metrics.
    * Optional: summaries saved before the SUB_COMMANDER role do not have it (read with `?? 0`).
    */
   issued: { voice: number; manual: number; byRole?: IssuedByRole };
   candidates: { shown: number; published: number };
-  /** misrecognized/changed = cancels by the main commander only (KR3). Others are counted by role below. */
+  /** misrecognized/changed = cancels by reason, whoever cancelled (KR3). byOthers = who cancelled: sub-order / operator. */
   cancelled: { misrecognized: number; changed: number; byOthers?: CancelledByOthers };
   corrected: number;
   latencyMs: { p50: number; p95: number };

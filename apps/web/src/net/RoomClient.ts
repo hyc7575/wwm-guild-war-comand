@@ -89,6 +89,12 @@ export interface RoomClientOptions {
   uuid?: () => string;
   env?: RoomClientEnv;
   handlers?: RoomClientHandlers;
+  /**
+   * Called after FAILS_BEFORE_ROOM_CHECK consecutive connection failures without a welcome.
+   * A closed or expired room answers the WebSocket upgrade with HTTP 404, which the browser
+   * reports as a plain failure, so the client would retry forever. Resolve 'NOT_FOUND' to end it.
+   */
+  checkRoom?: () => Promise<'NOT_FOUND' | 'UNKNOWN'>;
 }
 
 export const BACKOFF_BASE_MS = 500;
@@ -96,6 +102,7 @@ export const BACKOFF_MAX_MS = 8000;
 export const BACKOFF_JITTER = 0.2;
 export const ACK_TIMEOUT_MS = 2000;
 export const MAX_RESENDS = 4;
+export const FAILS_BEFORE_ROOM_CHECK = 3;
 const MAX_UNSENT_KEPT = 100;
 const WS_OPEN = 1;
 
@@ -143,6 +150,10 @@ export class RoomClient {
   private stopped = false;
   private lastSeq: number | undefined;
   private attempt = 0;
+  /** Consecutive failed connections that never reached welcome. */
+  private failsWithoutWelcome = 0;
+  private welcomed = false;
+  private checkingRoom = false;
   private lastRx = 0;
   private partyChoice: PartyId | null = null;
   /** Last stt.status passed to send(); re-sent after every welcome (server resets STT on commander close). */
@@ -283,6 +294,7 @@ export class RoomClient {
       return;
     }
     this.ws = ws;
+    this.welcomed = false;
     this.lastRx = this.now();
     ws.onopen = () => {
       if (this.ws !== ws) return;
@@ -345,6 +357,11 @@ export class RoomClient {
       this.setStatus('OFFLINE');
       return;
     }
+    if (this.welcomed) this.failsWithoutWelcome = 0;
+    else if (++this.failsWithoutWelcome >= FAILS_BEFORE_ROOM_CHECK) {
+      this.failsWithoutWelcome = 0;
+      this.verifyRoom();
+    }
     this.setStatus('RECONNECTING');
     if (immediate) {
       this.connect();
@@ -356,6 +373,20 @@ export class RoomClient {
       this.retryTimer = null;
       this.connect();
     }, delay);
+  }
+
+  private verifyRoom(): void {
+    const check = this.o.checkRoom;
+    if (!check || this.checkingRoom) return;
+    this.checkingRoom = true;
+    void check()
+      .catch(() => 'UNKNOWN' as const)
+      .then((r) => {
+        this.checkingRoom = false;
+        if (r !== 'NOT_FOUND' || this.stopped || this.status === 'CONNECTED') return;
+        if (this.status === 'CLOSED' || this.status === 'REPLACED') return;
+        this.finish('CLOSED', 'ROOM_NOT_FOUND');
+      });
   }
 
   private cancelRetry(): void {
@@ -460,6 +491,8 @@ export class RoomClient {
       case 'welcome': {
         this.lastSeq = msg.snapshot.seq;
         this.attempt = 0;
+        this.welcomed = true;
+        this.failsWithoutWelcome = 0;
         this.setStatus('CONNECTED');
         this.handlers.onMessage?.(msg);
         if (this.partyChoice !== null) this.send({ type: 'party.select', partyId: this.partyChoice });

@@ -12,6 +12,8 @@ export const LIMITS = {
   commanderStaleMs: 25_000,
   roomMaxLifetimeMs: 4 * 3600_000,
   commanderAbsentCloseMs: 30 * 60_000,
+  /** After a (re)start the room is never closed as COMMANDER_ABSENT before this long: gives the commander time to reconnect. */
+  restartGraceMs: 60_000,
   maxCommands: 50,
   minParties: 1,
   maxParties: 12,
@@ -32,4 +34,6 @@ export const LIMITS = {
   offlineQueueMaxAgeMs: 10_000,
   candidateTtlMs: 10_000,
   sttFeedMaxEntries: 20,
+  /** Max length (UTF-16 code units, not bytes) of one inbound WebSocket text frame; checked before JSON.parse. */
+  maxFrameLength: 8192,
 } as const;

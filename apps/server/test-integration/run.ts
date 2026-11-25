@@ -344,6 +344,31 @@ async function main() {
     check((await sub.type('stt.feed')).from === 'COMMANDER', 'stt.feed relayed to sub');
     const subPres = await cmd.waitFor((m) => m.type === 'presence' && m.subCommandersOnline === 1, 6000);
     check(subPres.subCommandersOnline === 1, 'presence.subCommandersOnline');
+
+    console.log('sub-commander manages main-order commands');
+    const mainA = cid();
+    cmd.send({ type: 'command.issue', clientCmdId: mainA, target: { kind: 'PARTIES', partyIds: [p1] }, action: 'DEFEND', source: 'MANUAL' });
+    const mainAId = (await cmd.ack(mainA)).commandId as string;
+    const corrMark = members[1]!.mark();
+    const subCorr = cid();
+    sub.send({ type: 'command.correct', clientCmdId: subCorr, correctsId: mainAId, action: 'ATTACK', source: 'MANUAL' });
+    const subCorrAck = await sub.ack(subCorr);
+    check(!!subCorrAck.commandId && !subCorrAck.error, 'sub can correct a main-order command');
+    const subCorrEv = await members[1]!.event('command.corrected', corrMark);
+    check(subCorrEv.payload.correctedId === mainAId && subCorrEv.payload.command.issuer?.role === 'SUB_COMMANDER', 'corrected command carries issuer SUB_COMMANDER');
+    const mainB = cid();
+    cmd.send({ type: 'command.issue', clientCmdId: mainB, target: { kind: 'PARTIES', partyIds: [p3] }, action: 'RETREAT', source: 'MANUAL' });
+    const mainBId = (await cmd.ack(mainB)).commandId as string;
+    const cancMark = members[1]!.mark();
+    const subCanc = cid();
+    sub.send({ type: 'command.cancel', clientCmdId: subCanc, commandId: mainBId });
+    check(!(await sub.ack(subCanc)).error, 'sub can cancel a main-order command');
+    const subCancEv = await members[1]!.event('command.cancelled', cancMark);
+    check(subCancEv.payload.commandIds[0] === mainBId && subCancEv.payload.cancelledBy === 'SUB_COMMANDER', 'cancelled event carries cancelledBy SUB_COMMANDER');
+    const mainCancMark = cmd.mark();
+    sub.send({ type: 'command.cancel', clientCmdId: cid(), commandId: subCorrAck.commandId });
+    const cmdCancEv = await cmd.event('command.cancelled', mainCancMark);
+    check(cmdCancEv.payload.cancelledBy === 'SUB_COMMANDER', 'main commander also sees cancelledBy');
     sub.close();
 
     console.log('reconnect');
@@ -420,6 +445,70 @@ async function main() {
     }
     check(lateRejected, 'WebSocket upgrade to closed/non-existent room is refused (404)');
 
+    console.log('sub-commander only: commander offline, room lifetime unaffected');
+    const created3 = await api('/api/rooms', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ parties: [{}, {}] }),
+    });
+    const r3 = (await created3.json()) as any;
+    console.log('frame size cap');
+    const big = await mk('big').connect(r3.code);
+    big.send({ type: 'hello', roomCode: r3.code, clientId: 'bigm', role: 'MEMBER' });
+    await big.type('welcome');
+    const bigMark = big.mark();
+    big.send({ type: 'party.select', partyId: null, pad: 'x'.repeat(9000) });
+    check((await big.waitFor((m) => m.type === 'error', 5000, bigMark)).code === 'INVALID_MESSAGE' && !big.closed, 'oversized frame after hello -> INVALID_MESSAGE, connection kept');
+    const bigPre = await mk('bigPre').connect(r3.code);
+    bigPre.send({ type: 'hello', roomCode: r3.code, clientId: 'bigp', role: 'MEMBER', nickname: 'x', pad: 'x'.repeat(9000) });
+    check((await bigPre.type('error')).code === 'INVALID_MESSAGE', 'oversized first frame -> INVALID_MESSAGE');
+    await bigPre.waitClosed();
+    big.close();
+
+    const sub3 = await mk('sub3').connect(r3.code);
+    sub3.send({ type: 'hello', roomCode: r3.code, clientId: 'sub3', role: 'SUB_COMMANDER', subCommanderToken: r3.subCommanderToken });
+    const w3 = await sub3.type('welcome');
+    check(w3.snapshot.presence.commanderOnline === false && w3.snapshot.presence.subCommandersOnline === 1, 'sub-only: presence commanderOnline=false');
+    await new Promise((r) => setTimeout(r, 12_000)); // past one liveness tick and the hello deadline
+    check(!sub3.closed && !sub3.msgs.some((m) => m.type === 'room.closed'), 'sub-only: socket stays open (no commander-driven close or stale drop)');
+    check((await api(`/api/rooms/${r3.code}`)).status === 200, 'sub-only: room still open');
+    const cmd3 = await mk('cmd3').connect(r3.code);
+    cmd3.send({ type: 'hello', roomCode: r3.code, clientId: 'c3', role: 'COMMANDER', commanderToken: r3.commanderToken });
+    await cmd3.type('welcome');
+    await sub3.waitFor((m) => m.type === 'presence' && m.commanderOnline === true, 6000);
+    const off3 = sub3.mark();
+    cmd3.close();
+    await sub3.waitFor((m) => m.type === 'presence' && m.commanderOnline === false && m.subCommandersOnline === 1, 6000, off3);
+    check(true, 'commander leaves: presence commanderOnline=false while sub stays');
+    sub3.close();
+
+    console.log('ROOM_FULL counts sub-commanders and operators');
+    const created4 = await api('/api/rooms', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ parties: [{}, {}], settings: { maxMembers: 2 } }),
+    });
+    const r4 = (await created4.json()) as any;
+    const op4 = await mk('op4').connect(r4.code);
+    op4.send({ type: 'hello', roomCode: r4.code, clientId: 'op4', role: 'OPERATOR', operatorToken: r4.operatorToken });
+    await op4.type('welcome');
+    const sub4 = await mk('sub4').connect(r4.code);
+    sub4.send({ type: 'hello', roomCode: r4.code, clientId: 'sub4', role: 'SUB_COMMANDER', subCommanderToken: r4.subCommanderToken });
+    await sub4.type('welcome');
+    const mem4 = await mk('mem4').connect(r4.code);
+    mem4.send({ type: 'hello', roomCode: r4.code, clientId: 'mem4', role: 'MEMBER' });
+    check((await mem4.type('error')).code === 'ROOM_FULL', 'operator + sub fill maxMembers=2 -> member gets ROOM_FULL');
+    const sub4b = await mk('sub4b').connect(r4.code);
+    sub4b.send({ type: 'hello', roomCode: r4.code, clientId: 'sub4b', role: 'SUB_COMMANDER', subCommanderToken: r4.subCommanderToken });
+    check((await sub4b.type('error')).code === 'ROOM_FULL', 'a second sub-commander also gets ROOM_FULL');
+    const sub4c = await mk('sub4c').connect(r4.code);
+    sub4c.send({ type: 'hello', roomCode: r4.code, clientId: 'sub4', role: 'SUB_COMMANDER', subCommanderToken: r4.subCommanderToken });
+    await sub4c.type('welcome');
+    check(true, 'same clientId + role replaces the old socket instead of counting twice');
+    const cmd4 = await mk('cmd4').connect(r4.code);
+    cmd4.send({ type: 'hello', roomCode: r4.code, clientId: 'c4', role: 'COMMANDER', commanderToken: r4.commanderToken });
+    check((await cmd4.type('welcome')).role === 'COMMANDER', 'commander is never blocked by ROOM_FULL');
+
     console.log('half-open commander');
     const created2 = await api('/api/rooms', {
       method: 'POST',
@@ -483,12 +572,26 @@ async function guardTests() {
   check((await wsStatus(`${WS_BASE}/api/rooms/${created.code}/ws`, 'https://evil.example')) === 403, 'dev: WebSocket upgrade foreign Origin -> 403');
   check((await wsStatus(`${WS_BASE}/api/rooms/${created.code}/ws`, 'http://localhost:5173')) === 101, 'dev: WebSocket upgrade loopback Origin -> 101');
 
+  console.log('404 lookups are limited separately (miss bucket, default 20/min)');
+  const miss: number[] = [];
+  for (let i = 0; i < 25; i++) {
+    // first one is a malformed percent-escape: must be a plain 404, not a 500
+    const r = await fetch(`${BASE}/api/rooms/${i === 0 ? '%E0%A4%A' : `ZZZZZ${i}`}`);
+    miss.push(r.status);
+  }
+  check(miss[0] === 404, 'malformed percent-escape in room code -> 404');
+  const firstBlock = miss.indexOf(429);
+  // earlier checks in this run already spent a few misses from the same IP
+  check(firstBlock > 5 && firstBlock <= 20 && miss.slice(0, firstBlock).every((c) => c === 404) && miss.slice(firstBlock).every((c) => c === 429), `unknown rooms: 404 until the bucket (20/min) is spent, then 429 (after ${firstBlock})`);
+
   console.log('strict vars (ALLOWED_ORIGINS list, HTTP_RATE_LIMIT 2,3)');
   const port2 = PORT + 10;
   const b2 = `http://127.0.0.1:${port2}`;
   const child2 = await startWrangler(port2, ['--var', 'ALLOWED_ORIGINS:https://good.example', '--var', 'HTTP_RATE_LIMIT:2,3']);
   try {
     check((await post(b2, 'http://localhost:5173')).status === 403, 'list: loopback not in list -> 403');
+    const sameOrigin = await fetch(`${b2}/api/rooms`, { method: 'OPTIONS', headers: { origin: b2 } });
+    check(sameOrigin.status === 204, 'list: request own origin allowed even though not in the list');
     const ok = await post(b2, 'https://good.example');
     check(ok.status === 201 && ok.headers.get('access-control-allow-origin') === 'https://good.example', 'list: listed Origin allowed');
     const room = (await ok.json()) as any;

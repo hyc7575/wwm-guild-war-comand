@@ -13,7 +13,7 @@ export interface SummaryInput {
   roomCode: string;
   startedAt: number;
   endedAt: number;
-  metrics: Pick<MetricsSnapshot, 'issuedVoice' | 'issuedManual' | 'candidateShown' | 'candidatePublished' | 'corrected' | 'latencies'>;
+  metrics: { issuedVoice: number } & Pick<MetricsSnapshot, 'issuedManual' | 'candidateShown' | 'candidatePublished' | 'corrected' | 'latencies'>;
   stt: { activeListeningMs: number; recoveries: number };
   peakMembers: number;
   /** Keyed by party number. */

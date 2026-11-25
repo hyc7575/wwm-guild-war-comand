@@ -65,7 +65,6 @@ describe('CommandPipeline', () => {
       location: { id: 'RIGHT', label: '우측' },
       transcript: '3파티 우측 방어',
     });
-    expect(metrics.snapshot().issuedVoice).toBe(1);
     const sub = p.getSnapshot().subtitles;
     expect(sub).toHaveLength(1);
     expect(sub[0]!.chips[0]).toMatchObject({ kind: 'ISSUED', label: '3파티 방어 우측', clientCmdId: 'req1' });
@@ -192,6 +191,16 @@ describe('CommandPipeline', () => {
     expect(cand.kind).toBe('CORRECT');
     p.publishCandidate(cand.id);
     expect(sent[1]!.input).toMatchObject({ type: 'command.correct', correctsId: 'C1', action: 'MOVE', location: { id: 'CENTER' } });
+  });
+
+  it('editing a CORRECT candidate keeps correctsId so the panel can publish command.correct', () => {
+    const { p, sent, ack } = setup();
+    p.onFinalTranscript('3파티 방어', { endedAt: Date.now() });
+    ack(sent[0]!, 'C1', { target: { kind: 'PARTIES', partyIds: ['p3'] }, action: 'DEFEND' });
+    vi.advanceTimersByTime(5000);
+    p.onFinalTranscript('우측 말고 중앙으로 이동', { endedAt: Date.now() });
+    const edited = p.editCandidate(p.getSnapshot().candidates[0]!.id);
+    expect(edited).toMatchObject({ correctsId: 'C1', action: 'MOVE', target: { kind: 'PARTIES', partyIds: ['p3'] } });
   });
 
   it('after 15s a correction word is not treated as a correction', () => {

@@ -1,0 +1,15 @@
+// 부정 표현은 반대 뜻 명령으로 발행하면 안 된다
+{"text": "1파티 공격 하지마", "expect": [{"kind": "NONE"}]}
+{"text": "1파티 공격 하지 마", "expect": [{"kind": "NONE"}]}
+{"text": "1파티 공격하지 마세요", "expect": [{"kind": "NONE"}]}
+{"text": "1파티 공격 안 돼", "expect": [{"kind": "NONE"}]}
+{"text": "2파티 중앙으로 이동 중지", "expect": [{"kind": "NONE"}]}
+{"text": "3파티 공격 금지", "expect": [{"kind": "NONE"}]}
+{"text": "1파티 공격 말고", "note": "정정어로 끝나 슬롯이 없으면 앞부분을 발행하지 않는다", "expect": [{"kind": "NONE"}]}
+{"text": "1파티 공격 말고", "last": {"target": [1], "action": "ATTACK", "ageMs": 3000}, "expect": [{"kind": "NONE"}]}
+// 전체와 파티가 함께 나오거나 파티가 도착지인 발화는 확신도 중간
+{"text": "다들 1파티 쪽으로 모여", "expect": [{"kind": "ISSUE", "confidence": "MEDIUM", "target": "ALL", "action": "GATHER"}]}
+{"text": "전원 2파티한테 모여", "expect": [{"kind": "ISSUE", "confidence": "MEDIUM", "target": "ALL", "action": "GATHER"}]}
+{"text": "전원 1파티 공격", "note": "전체와 파티가 섞이면 어느 쪽인지 모른다", "expect": [{"kind": "ISSUE", "confidence": "MEDIUM", "target": [1], "action": "ATTACK"}]}
+{"text": "두 파티만 남고 다 빠져", "note": "띄어 쓴 두 파티는 개수 표현", "expect": [{"kind": "ISSUE", "confidence": "MEDIUM", "target": [2], "action": "RETREAT"}]}
+{"text": "세 파티만 공격", "expect": [{"kind": "ISSUE", "confidence": "MEDIUM", "target": [3], "action": "ATTACK"}]}

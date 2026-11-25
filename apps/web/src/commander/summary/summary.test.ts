@@ -98,6 +98,12 @@ describe('SessionSummaryCollector', () => {
     id, seq: 1, target: { kind: 'ALL' }, action: 'ATTACK', status: 'CANCELLED', cancelReason: reason, source: 'VOICE', issuedAt: 1, repeatCount: 0,
   });
 
+  const voiceIssued = (src: ReturnType<typeof fakeSource>, seq: number, id: string) =>
+    src.set({
+      commands: { ...src.source.getState().commands, [id]: { ...cmd(id, undefined), status: 'ACTIVE' } },
+      lastEvent: { seq, kind: 'command.issued', commandId: id },
+    });
+
   function setup(store = new MemorySummaryStore(), metrics = new SessionMetrics()) {
     const src = fakeSource();
     const col = new SessionSummaryCollector({ roomCode: 'K7M2QX', source: src.source, store, getMetrics: () => metrics.snapshot() });
@@ -121,10 +127,9 @@ describe('SessionSummaryCollector', () => {
     col.dispose();
   });
 
-  it('counts issued by issuer.role from command.issued events only, and keeps non-commander cancels out of KR3', async () => {
+  it('counts issued by issuer.role from command.issued events, and counts a cancel reason whoever cancelled', async () => {
     const { src, col, metrics } = setup();
     await col.start();
-    metrics.issuedVoice(); // local request metric: must not touch byRole
     const withIssuer = (id: string, role: 'COMMANDER' | 'SUB_COMMANDER' | 'OPERATOR'): Command => ({ ...cmd(id, undefined), status: 'ACTIVE', issuer: { role } });
     const issue = (seq: number, id: string, role: 'COMMANDER' | 'SUB_COMMANDER' | 'OPERATOR') =>
       src.set({ commands: { ...src.source.getState().commands, [id]: withIssuer(id, role) }, lastEvent: { seq, kind: 'command.issued', commandId: id } });
@@ -137,9 +142,34 @@ describe('SessionSummaryCollector', () => {
     src.set({ lastEvent: { seq: 7, kind: 'command.cancelled', commandIds: ['b'], cancelledBy: 'COMMANDER' } });
     src.set({ lastEvent: { seq: 8, kind: 'command.cancelled', commandIds: ['c'] } });
     const s = col.snapshot().summary;
-    expect(s.issued.voice).toBe(1);
+    expect(s.issued.voice).toBe(5); // every cmd() helper command has source VOICE
     expect(s.issued.byRole).toEqual({ COMMANDER: 1, SUB_COMMANDER: 2, OPERATOR: 1 });
-    expect(s.cancelled).toEqual({ misrecognized: 0, changed: 2, byOthers: { SUB_COMMANDER: 1, OPERATOR: 0 } });
+    // reason counts whoever cancelled: the sub-order's MISRECOGNIZED cancel counts, byOthers counts the canceller
+    expect(s.cancelled).toEqual({ misrecognized: 1, changed: 2, byOthers: { SUB_COMMANDER: 1, OPERATOR: 0 } });
+    col.dispose();
+  });
+
+  it('counts an operator cancelling a misrecognized voice command as misrecognized, and the canceller separately', async () => {
+    const { src, col } = setup();
+    await col.start();
+    src.set({ commands: { m: cmd('m', 'MISRECOGNIZED') }, lastEvent: { seq: 1, kind: 'command.cancelled', commandIds: ['m'], cancelledBy: 'OPERATOR' } });
+    const s = col.snapshot().summary;
+    expect(s.cancelled.misrecognized).toBe(1);
+    expect(s.cancelled.byOthers).toEqual({ SUB_COMMANDER: 0, OPERATOR: 1 });
+    col.dispose();
+  });
+
+  it('counts a voice command once when the same utterance is repeated (issued + repeated events)', async () => {
+    const { src, col } = setup();
+    await col.start();
+    voiceIssued(src, 1, 'v1');
+    src.set({ lastEvent: { seq: 2, kind: 'command.repeated', commandId: 'v1' } });
+    expect(col.snapshot().summary.issued.voice).toBe(1);
+    // a MANUAL command and a voice correction
+    src.set({ commands: { ...src.source.getState().commands, k: { ...cmd('k', undefined), status: 'ACTIVE', source: 'MANUAL' } }, lastEvent: { seq: 3, kind: 'command.issued', commandId: 'k' } });
+    expect(col.snapshot().summary.issued.voice).toBe(1);
+    src.set({ commands: { ...src.source.getState().commands, c: { ...cmd('c', undefined), status: 'ACTIVE' } }, lastEvent: { seq: 4, kind: 'command.corrected', commandId: 'c' } });
+    expect(col.snapshot().summary.issued.voice).toBe(2);
     col.dispose();
   });
 
@@ -163,9 +193,9 @@ describe('SessionSummaryCollector', () => {
   });
 
   it('saves a temp copy every minute and stops after the final save', async () => {
-    const { col, store, metrics } = setup();
+    const { src, col, store, metrics } = setup();
     await col.start();
-    metrics.issuedVoice();
+    voiceIssued(src, 1, 'v1');
     metrics.latency(250);
     await vi.advanceTimersByTimeAsync(TEMP_SAVE_MS);
     expect((await store.loadTemp('K7M2QX'))?.summary.issued.voice).toBe(1);
@@ -196,7 +226,7 @@ describe('SessionSummaryCollector', () => {
     const store = new MemorySummaryStore();
     const a = setup(store);
     await a.col.start();
-    a.metrics.issuedVoice();
+    voiceIssued(a.src, 1, 'v1');
     a.src.set({ presence: presence(6) });
     await a.col.saveTemp();
     a.col.dispose();
@@ -204,7 +234,7 @@ describe('SessionSummaryCollector', () => {
     vi.setSystemTime(Date.now() + 120_000);
     const b = setup(store);
     await b.col.start();
-    b.metrics.issuedVoice();
+    voiceIssued(b.src, 1, 'v2');
     const s = b.col.snapshot().summary;
     expect(s.issued.voice).toBe(2);
     expect(s.peakMembers).toBe(6);
@@ -216,7 +246,7 @@ describe('SessionSummaryCollector', () => {
     const store = new MemorySummaryStore();
     const a = setup(store);
     await a.col.start();
-    a.metrics.issuedVoice();
+    voiceIssued(a.src, 1, 'v1');
     await a.col.finalize();
     const b = setup(store);
     await b.col.start();

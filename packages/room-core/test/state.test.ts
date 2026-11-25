@@ -22,7 +22,7 @@ import {
 let idn = 0;
 const newId = () => `c${++idn}`;
 const T0 = 1_000_000;
-const ctx = (now = T0) => ({ now, newId });
+const ctx = (now = T0) => ({ now, newId, role: 'COMMANDER' as const });
 
 function mk(n = 3): RoomState {
   idn = 0;
@@ -45,8 +45,13 @@ const CEN = { id: 'CENTER', label: '중앙' };
 const RIGHT = { id: 'RIGHT', label: '우측' };
 const cur = (s: RoomState) => s.parties.map((p) => currentCommandId(s, p.id));
 const get = (s: RoomState, id: string) => s.commands.find((c) => c.id === id)!;
-const issue = (s: RoomState, input: Parameters<typeof issueCommand>[1], now = T0, id: () => string = newId) =>
-  ok(issueCommand(s, input, { now, newId: id }));
+const issue = (
+  s: RoomState,
+  input: Parameters<typeof issueCommand>[1],
+  now = T0,
+  id: () => string = newId,
+  role: 'COMMANDER' | 'SUB_COMMANDER' = 'COMMANDER',
+) => ok(issueCommand(s, input, { now, newId: id, role, issuer: { role } }));
 
 describe('createRoomState', () => {
   it('assigns stable ids, empty stacks, hashes, expiry', () => {
@@ -336,17 +341,32 @@ describe('updateParties', () => {
 
 describe('settings & close', () => {
   it('merges partial settings and emits', () => {
-    const r = ok(updateSettings(mk(), { shareTranscript: true }));
+    const r = ok(updateSettings(mk(), { shareTranscript: true }, ctx()));
     expect(r.state.settings.shareTranscript).toBe(true);
     expect(r.state.settings.maxMembers).toBe(LIMITS.maxMembers);
     expect(r.events[0]!.kind).toBe('settings.updated');
   });
   it('closeRoom marks CLOSED', () => {
-    expect(ok(closeRoom(mk())).state.status).toBe('CLOSED');
+    expect(ok(closeRoom(mk(), ctx())).state.status).toBe('CLOSED');
   });
 });
 
 describe('idempotency', () => {
+  it('withClientCmd does not mutate its input state (ALREADY_CANCELLED no-op)', () => {
+    let s = issue(mk(), { target: ALL, action: 'GATHER', source: 'VOICE' }).state;
+    const a = s.commands[0]!.id;
+    s = ok(cancelCommand(s, { commandId: a }, ctx(T0 + 1))).state;
+    const before = JSON.stringify(s);
+    const r = ok(withClientCmd(s, 'again', (x) => cancelCommand(x, { commandId: a }, ctx(T0 + 2))));
+    expect(r.ack.note).toBe('ALREADY_CANCELLED');
+    expect(JSON.stringify(s)).toBe(before);
+    expect(s.recentClientCmds.some((c) => c.clientCmdId === 'again')).toBe(false);
+    expect(r.state).not.toBe(s);
+    expect(r.state.recentClientCmds.at(-1)).toMatchObject({ clientCmdId: 'again', note: 'ALREADY_CANCELLED' });
+    // replay of the same id is a true duplicate
+    expect(withClientCmd(r.state, 'again', () => { throw new Error('should not run'); }).ok).toBe(true);
+  });
+
   it('duplicate clientCmdId returns same ack, no events, no state change', () => {
     const s = mk();
     const r1 = ok(withClientCmd(s, 'k1', (x) => issueCommand(x, { target: ALL, action: 'MOVE', source: 'MANUAL' }, ctx())));
@@ -364,7 +384,7 @@ describe('idempotency', () => {
     const st = (r as { state: RoomState }).state;
     expect(withClientCmd(st, 'e1', (x) => issueCommand(x, { target: ALL, action: 'MOVE', source: 'MANUAL' }, ctx()))).toEqual({ ok: false, error: 'UNKNOWN_PARTY' });
     let cur2 = s;
-    for (let i = 0; i < 250; i++) cur2 = ok(withClientCmd(cur2, `k${i}`, (x) => updateSettings(x, {}))).state;
+    for (let i = 0; i < 250; i++) cur2 = ok(withClientCmd(cur2, `k${i}`, (x) => updateSettings(x, {}, ctx()))).state;
     expect(cur2.recentClientCmds).toHaveLength(200);
     expect(cur2.recentClientCmds[0]!.clientCmdId).toBe('k50');
   });
@@ -397,7 +417,7 @@ describe('cap and seq', () => {
     s = push(issueCommand(s, { target: ALL, action: 'GATHER', source: 'VOICE' }, ctx()));
     s = push(issueCommand(s, { target: ALL, action: 'GATHER', source: 'VOICE' }, ctx(T0 + 1))); // repeat
     s = push(correctCommand(s, { correctsId: s.commands[0]!.id, action: 'MOVE', source: 'VOICE' }, ctx(T0 + 2)));
-    s = push(updateSettings(s, { shareTranscript: true }));
+    s = push(updateSettings(s, { shareTranscript: true }, ctx()));
     s = push(cancelCommand(s, { commandId: s.commands[1]!.id }, ctx(T0 + 3)));
     s = push(cancelCommand(s, { commandId: s.commands[1]!.id }, ctx(T0 + 4))); // no event
     s = push(updateParties(s, { baseVersion: 1, parties: s.parties }, ctx(T0 + 5)));
@@ -413,7 +433,7 @@ describe('snapshot / transcript filtering', () => {
     expect(toSnapshot(s, presence, 'MEMBER').commands[0]!.transcript).toBeUndefined();
     expect(toSnapshot(s, presence, 'COMMANDER').commands[0]!.transcript).toBe('전체 집결');
     expect(toSnapshot(s, presence, 'OPERATOR').commands[0]!.transcript).toBe('전체 집결');
-    s = ok(updateSettings(s, { shareTranscript: true })).state;
+    s = ok(updateSettings(s, { shareTranscript: true }, ctx())).state;
     expect(toSnapshot(s, presence, 'MEMBER').commands[0]!.transcript).toBe('전체 집결');
     expect(s.commands[0]!.transcript).toBe('전체 집결'); // state untouched
   });
@@ -498,9 +518,9 @@ describe('review fixes', () => {
     for (let i = 0; i < LIMITS.maxCommands; i++) {
       s = issue(s, {
         target: ALL, action: 'ATTACK', source: 'VOICE', supportPartyIds: ids.slice(0, 3),
-        location: { id: 'CENTER', label: '가나다라마바사아자차카타파하갸냐댜랴먀뱌샤' }, confidence: 0.123456789,
+        location: { id: 'CENTER', label: '가나다라마바사아자차카타파하갸냐댜랴먀뱌' }, confidence: 0.123456789,
         transcript: '가'.repeat(LIMITS.transcriptMax),
-      }, T0 + i * 20_000, longIds).state;
+      }, T0 + i * 20_000, longIds, 'SUB_COMMANDER').state; // issuer included: the worst case
     }
     expect(s.commands).toHaveLength(LIMITS.maxCommands);
     for (const role of ['COMMANDER', 'OPERATOR'] as const) {
@@ -513,8 +533,8 @@ describe('review fixes', () => {
 });
 
 describe('sub-commander (multiple issuers)', () => {
-  const main = (now = T0) => ({ now, newId, issuer: { role: 'COMMANDER' } as const });
-  const sub = (now = T0) => ({ now, newId, issuer: { role: 'SUB_COMMANDER' } as const });
+  const main = (now = T0) => ({ now, newId, role: 'COMMANDER' as const, issuer: { role: 'COMMANDER' } as const });
+  const sub = (now = T0) => ({ now, newId, role: 'SUB_COMMANDER' as const, issuer: { role: 'SUB_COMMANDER' } as const });
 
   it('permission predicates', () => {
     expect(canCommand('SUB_COMMANDER') && canCommand('OPERATOR') && canCommand('COMMANDER')).toBe(true);
@@ -579,6 +599,22 @@ describe('sub-commander (multiple issuers)', () => {
     // no issuer in ctx -> field absent
     const r2 = ok(cancelCommand(s, { commandId: s.commands[0]!.id }, ctx(T0 + 1000)));
     expect((r2.events[0] as { payload: { cancelledBy?: string } }).payload.cancelledBy).toBeUndefined();
+  });
+
+  it('fails closed: a ctx without a role (or MEMBER) is FORBIDDEN for every request', () => {
+    let s = mk();
+    s = ok(issueCommand(s, { target: P('p1'), action: 'ATTACK', source: 'MANUAL' }, main(T0))).state;
+    const id = s.commands[0]!.id;
+    const noRole = { now: T0 + 1, newId } as never;
+    const member = { now: T0 + 1, newId, role: 'MEMBER' } as const;
+    for (const c of [noRole, member]) {
+      expect(issueCommand(s, { target: ALL, action: 'HOLD', source: 'MANUAL' }, c)).toMatchObject({ ok: false, error: 'FORBIDDEN' });
+      expect(correctCommand(s, { correctsId: id, action: 'HOLD', source: 'MANUAL' }, c)).toMatchObject({ ok: false, error: 'FORBIDDEN' });
+      expect(cancelCommand(s, { commandId: id }, c)).toMatchObject({ ok: false, error: 'FORBIDDEN' });
+      expect(updateParties(s, { baseVersion: 1, parties: s.parties }, c)).toMatchObject({ ok: false, error: 'FORBIDDEN' });
+      expect(updateSettings(s, { shareTranscript: true }, c)).toMatchObject({ ok: false, error: 'FORBIDDEN' });
+      expect(closeRoom(s, c)).toMatchObject({ ok: false, error: 'FORBIDDEN' });
+    }
   });
 
   it('sub cannot update parties, settings or close the room', () => {

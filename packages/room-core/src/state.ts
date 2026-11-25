@@ -59,7 +59,9 @@ export type Result = Ok | Err;
 export interface Ctx {
   now: number;
   newId: () => string;
-  /** Filled by the server from the connection, never from client payloads. */
+  /** Authenticated role of the requester. Required: a missing role is refused, never allowed. */
+  role: Role;
+  /** Recorded on commands/cancel events. Filled by the server from the connection, never from client payloads. */
   issuer?: CommandIssuer;
 }
 
@@ -69,8 +71,9 @@ export const canCommand = (role: Role): boolean =>
 /** May change parties/settings or close the room. */
 export const canAdmin = (role: Role): boolean => role === 'COMMANDER';
 
+/** Fails closed: no ctx or no role means forbidden. */
 const forbidden = (ctx: Ctx | undefined, check: (r: Role) => boolean): boolean =>
-  !!ctx?.issuer && !check(ctx.issuer.role);
+  !ctx?.role || !check(ctx.role);
 
 export interface IssueInput {
   target: Target;
@@ -472,7 +475,7 @@ export function updateParties(state: RoomState, input: PartiesInput, ctx: Ctx): 
   return { ok: true, state: s, events: [ev], ack: {} };
 }
 
-export function updateSettings(state: RoomState, patch: RoomSettingsPatch, ctx?: Ctx): Result {
+export function updateSettings(state: RoomState, patch: RoomSettingsPatch, ctx: Ctx): Result {
   if (forbidden(ctx, canAdmin)) return { ok: false, error: 'FORBIDDEN' };
   const s = clone(state);
   for (const [k, v] of Object.entries(patch)) {
@@ -482,7 +485,7 @@ export function updateSettings(state: RoomState, patch: RoomSettingsPatch, ctx?:
   return { ok: true, state: s, events: [ev], ack: {} };
 }
 
-export function closeRoom(state: RoomState, ctx?: Ctx): Result {
+export function closeRoom(state: RoomState, ctx: Ctx): Result {
   if (forbidden(ctx, canAdmin)) return { ok: false, error: 'FORBIDDEN' };
   const s = clone(state);
   s.status = 'CLOSED';
@@ -513,7 +516,8 @@ export function withClientCmd(
   } else {
     rec.error = r.error;
   }
-  const next = r.ok ? r.state : clone(state);
+  // Never mutate the input: a no-op result (e.g. ALREADY_CANCELLED) returns `state` itself.
+  const next = r.ok ? (r.state === state ? { ...state } : r.state) : clone(state);
   next.recentClientCmds = [...base.recentClientCmds, rec].slice(-MAX_RECENT_CLIENT_CMDS);
   return r.ok ? { ...r, state: next } : { ok: false, error: r.error, state: next };
 }
@@ -530,7 +534,7 @@ const canSeeTranscript = (settings: RoomSettings, role: Role) =>
   role !== 'MEMBER' || settings.shareTranscript;
 
 /** Snapshots keep transcripts only for the newest N commands (WebSocket frame budget). */
-export const SNAPSHOT_TRANSCRIPT_COMMANDS = 10;
+export const SNAPSHOT_TRANSCRIPT_COMMANDS = 6;
 
 export function toSnapshot(state: RoomState, presence: Presence, role: Role): Snapshot {
   const see = canSeeTranscript(state.settings, role);

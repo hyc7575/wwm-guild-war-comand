@@ -26,3 +26,9 @@
 {"text": "아까 거 취소해줘", "last": {"target": [1], "action": "GATHER", "location": "CENTER", "ageMs": 3000}, "expect": [{"kind": "CANCEL"}]}
 {"text": "방금 거 취소", "note": "직전 명령 없음", "expect": [{"kind": "NONE"}]}
 {"text": "취소", "last": {"target": [1], "action": "GATHER", "location": "CENTER", "ageMs": 3000}, "expect": [{"kind": "NONE"}]}
+// 취소: 단독 발화일 때만 (대상·행동이 직전과 다르면 취소하지 않는다)
+{"text": "3파티 방어 취소해", "last": {"target": [1], "action": "GATHER", "location": "CENTER", "ageMs": 3000}, "note": "대상·행동이 직전과 다르다", "expect": [{"kind": "NONE"}]}
+{"text": "1파티 공격 명령 취소", "last": {"target": [1], "action": "GATHER", "location": "CENTER", "ageMs": 3000}, "note": "명령 취소는 단독 발화만", "expect": [{"kind": "NONE"}]}
+{"text": "취소해줘", "last": {"target": [1], "action": "GATHER", "location": "CENTER", "ageMs": 3000}, "expect": [{"kind": "CANCEL"}]}
+{"text": "3파티 방어 방금 거 취소", "last": {"target": [3], "action": "DEFEND", "ageMs": 3000}, "note": "대상·행동이 직전과 같다", "expect": [{"kind": "CANCEL"}]}
+{"text": "3파티 방어 방금 거 취소", "last": {"target": [1], "action": "GATHER", "location": "CENTER", "ageMs": 3000}, "expect": [{"kind": "NONE"}]}

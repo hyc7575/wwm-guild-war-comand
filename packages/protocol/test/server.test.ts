@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   CreateRoomRequest, generateRoomCode, isValidRoomCode, makeDefaultParties, normalizeRoomCode,
-  parseServerMessage, ROOM_CODE_ALPHABET, DEFAULT_ROOM_SETTINGS, PARTY_COLORS,
+  parseServerMessage, ROOM_CODE_ALPHABET, CreateRoomResponse, DEFAULT_ROOM_SETTINGS, PARTY_COLORS,
 } from '../src';
 
 const parties = makeDefaultParties(3);
@@ -50,6 +50,39 @@ describe('server messages round trip', () => {
   });
   it('rejects cancelled event with no ids', () => {
     expect(parseServerMessage(JSON.stringify(ev('command.cancelled', { commandIds: [], reason: 'CHANGED', slots }))).ok).toBe(false);
+  });
+});
+
+describe('sub-commander schema', () => {
+  const issued = (issuer: unknown) =>
+    JSON.stringify(ev('command.issued', { command: { ...command, issuer }, slots }));
+  it('command.issuer accepts the three issuing roles and nothing else', () => {
+    for (const role of ['COMMANDER', 'SUB_COMMANDER', 'OPERATOR']) {
+      const r = parseServerMessage(issued({ role }));
+      expect(r.ok).toBe(true);
+      if (r.ok) expect(r.msg).toMatchObject({ payload: { command: { issuer: { role } } } });
+    }
+    expect(parseServerMessage(issued({ role: 'MEMBER' })).ok).toBe(false);
+    expect(parseServerMessage(issued({ role: 'ROOT' })).ok).toBe(false);
+    expect(parseServerMessage(issued({})).ok).toBe(false);
+    expect(parseServerMessage(JSON.stringify(ev('command.issued', { command, slots }))).ok).toBe(true); // issuer optional
+  });
+  it('snapshot commands may carry issuer', () => {
+    const m = { v: 1, type: 'welcome', role: 'SUB_COMMANDER', memberId: 'm', snapshot: { ...snapshot, commands: [{ ...command, issuer: { role: 'SUB_COMMANDER' } }] } };
+    expect(parseServerMessage(JSON.stringify(m)).ok).toBe(true);
+    expect(parseServerMessage(JSON.stringify({ ...m, role: 'NOPE' })).ok).toBe(false);
+  });
+  it('command.cancelled cancelledBy is a Role', () => {
+    const c = (cancelledBy: unknown) =>
+      parseServerMessage(JSON.stringify(ev('command.cancelled', { commandIds: ['c1'], reason: 'CHANGED', slots, cancelledBy })));
+    expect(c('SUB_COMMANDER').ok).toBe(true);
+    expect(c('COMMANDER').ok).toBe(true);
+    expect(c('KING').ok).toBe(false);
+  });
+  it('create response carries subCommanderToken', () => {
+    const base = { code: 'ABC234', commanderToken: 'a', operatorToken: 'b', expiresAt: 1 };
+    expect(CreateRoomResponse.safeParse({ ...base, subCommanderToken: 'c' }).success).toBe(true);
+    expect(CreateRoomResponse.safeParse(base).success).toBe(false);
   });
 });
 

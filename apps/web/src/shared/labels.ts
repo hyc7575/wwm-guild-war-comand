@@ -65,7 +65,7 @@ export function targetLabel(target: Target, parties: Party[]): string {
   return target.partyIds
     .map((id) => {
       const p = partyById(parties, id);
-      return p ? `${p.number}파티` : '?';
+      return p ? `${p.number}파티` : '(삭제된 파티)';
     })
     .join('·');
 }

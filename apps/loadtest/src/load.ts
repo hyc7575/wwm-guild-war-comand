@@ -194,11 +194,12 @@ async function main() {
     console.log(`target ${BASE} | members ${MEMBERS} | commands ${COMMANDS} | interval ${INTERVAL}ms`);
 
     // create room
-    const nParties = Math.min(LIMITS.maxParties, 6);
+    // worst case for the snapshot size: the maximum number of parties, each with a full-length name and aliases
+    const nParties = LIMITS.maxParties;
     const created = await fetch(`${BASE}/api/rooms`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ parties: Array.from({ length: nParties }, (_, i) => ({ name: `파티${i + 1}` })) }),
+      body: JSON.stringify({ parties: Array.from({ length: nParties }, () => ({ name: '가나다라마바사아자차', aliases: ['가나다라마바사아', '자차카타파하갸냐'] })) }),
     });
     if (created.status !== 201) throw new Error(`create room failed: ${created.status} ${await created.text()}`);
     const { code, commanderToken } = (await created.json()) as { code: string; commanderToken: string };
@@ -330,13 +331,23 @@ async function main() {
       }
     }
 
-    // snapshot size: a fresh member's welcome
-    // (room cap is LIMITS.maxMembers; free a seat first so the probe is not rejected with ROOM_FULL)
-    if (MEMBERS >= LIMITS.maxMembers) {
-      const last = members[members.length - 1]!.client;
-      last.close();
-      await sleep(500);
+    // snapshot size, worst case: a COMMANDER's welcome (transcripts always visible) in a room whose
+    // command list is full of VOICE commands carrying a 200-char Hangul transcript.
+    for (let i = 0; i < LIMITS.maxCommands; i++) {
+      cmd.send({
+        type: 'command.issue',
+        clientCmdId: `worst-${i}-${Math.random().toString(36).slice(2, 7)}`,
+        target: { kind: 'ALL' }, action: 'ATTACK', supportPartyIds: partyIds.slice(0, 3),
+        location: { id: `w${i}`, label: '가나다라마바사아자차카타파하갸냐댜랴먀뱌' },
+        source: 'VOICE', confidence: 0.123456789, transcript: '가'.repeat(LIMITS.transcriptMax),
+      });
+      await sleep(220); // stay under the commander's 5/s bucket
     }
+    await sleep(500);
+    const worstBad = [...ackMsgs.entries()].filter(([id, m]) => id.startsWith('worst-') && (m.error || m.note));
+    if (worstBad.length) throw new Error(`worst-case fill not clean: ${worstBad.slice(0, 3).map(([, m]) => m.error ?? m.note).join(',')} (${worstBad.length})`);
+    cmd.close(); // the probe takes the commander seat; close on purpose so it is not counted as a drop
+    await sleep(500);
     const probe = new Client('probe');
     clients.push(probe);
     let snapBytes = 0;
@@ -344,7 +355,7 @@ async function main() {
       if (m.type === 'welcome') snapBytes = bytes;
     };
     await probe.connect(code);
-    probe.send({ type: 'hello', roomCode: code, clientId: 'load-probe', role: 'MEMBER' });
+    probe.send({ type: 'hello', roomCode: code, clientId: 'load-probe', role: 'COMMANDER', commanderToken });
     const pw = await probe.waitFor((m) => m.type === 'welcome' || m.type === 'error');
     if (pw.type === 'error') throw new Error(`snapshot probe rejected: ${pw.code}`);
     const snapCommands = pw.snapshot.commands.length;
@@ -356,7 +367,8 @@ async function main() {
     const errors = everyone.flatMap((c) => c.errors.map((e) => `${c.name} ${e}`));
 
     // ---------- billing estimate (06 D-3) ----------
-    const inboundMeasured = everyone.reduce((n, c) => n + c.inboundSent, 0);
+    // the worst-case snapshot fill (LIMITS.maxCommands extra requests) is not part of the traffic model
+    const inboundMeasured = everyone.reduce((n, c) => n + c.inboundSent, 0) - LIMITS.maxCommands;
     const pingsSent = everyone.reduce((n, c) => n + c.pingsSent, 0);
     const EST_MEMBERS = 30;
     const EST_JOINS = 3; // connections per member per session (D-3 table)

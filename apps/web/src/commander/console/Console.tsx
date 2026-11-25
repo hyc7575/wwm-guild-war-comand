@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useReducer, useRef, useState, type ReactNode } from 'react';
 import { Button, Group, Paper, Stack, Text, Title } from '@mantine/core';
-import type { CommandDraft } from '@winds/parser';
 import type { Action } from '@winds/protocol';
+import type { EditedDraft } from '../pipeline/CommandPipeline';
 import { useRoomStore } from '../../state/roomStore';
 import { AckStatusList, AckToasts, ErrorToast, UnsentList } from './AckPanel';
 import { ButtonPanel } from './ButtonPanel';
@@ -71,8 +71,15 @@ export function Console({ mode, code, operatorToken, subCommanderToken, roleLabe
     if (!live.current.dead) c.cancelLast();
   };
 
-  const prefill = (d: Partial<CommandDraft>) =>
-    dispatch({ type: 'prefill', target: d.target, action: d.action, location: d.location ?? null });
+  const prefill = (d: EditedDraft) =>
+    dispatch({
+      type: 'prefill',
+      target: d.target,
+      action: d.action,
+      location: d.location ?? null,
+      supportPartyIds: d.supportPartyIds,
+      correctsId: d.correctsId,
+    });
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {

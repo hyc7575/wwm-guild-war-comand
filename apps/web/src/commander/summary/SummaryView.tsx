@@ -22,7 +22,7 @@ export function SummaryView({ summary, temp }: { summary: SessionSummary; temp?:
     ],
     ['후보 (표시 / 게시)', `${s.candidates.shown} / ${s.candidates.published} (${publishRate(s)})`],
     ['취소 (오인식 / 변경)', `${s.cancelled.misrecognized} / ${s.cancelled.changed}`],
-    ['다른 발행자의 취소 (서브오더 / 운영자)', `${s.cancelled.byOthers?.SUB_COMMANDER ?? 0} / ${s.cancelled.byOthers?.OPERATOR ?? 0}`],
+    ['다른 사람이 한 취소 (서브오더 / 운영자)', `${s.cancelled.byOthers?.SUB_COMMANDER ?? 0} / ${s.cancelled.byOthers?.OPERATOR ?? 0}`],
     ['정정', `${s.corrected}`],
     ['말 끝 → 전달 확인 지연 (p50 / p95)', `${fmtLatency(s.latencyMs.p50)} / ${fmtLatency(s.latencyMs.p95)}`],
   ];

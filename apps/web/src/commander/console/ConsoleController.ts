@@ -1,4 +1,4 @@
-import type { Action, Location, Party, RoomSettingsPatch, SttState, Target } from '@winds/protocol';
+import type { Action, Location, Party, PartyId, RoomSettingsPatch, SttState, Target } from '@winds/protocol';
 import { DEFAULT_DICTIONARY, parse, type CommandDraft, type Dictionary } from '@winds/parser';
 import type { RequestInput, SendPayload, UnsentCommand } from '../../net/RoomClient';
 import type { AckRecord } from '../../state/roomReducer';
@@ -40,6 +40,9 @@ export interface ManualDraft {
   target: Target;
   action: Action;
   location?: Location;
+  supportPartyIds?: PartyId[];
+  /** Filled from a CORRECT candidate: send command.correct instead of a new command. */
+  correctsId?: string;
 }
 
 export interface TextPreview {
@@ -121,14 +124,17 @@ export class ConsoleController {
   // ---------- manual issue / cancel ----------
 
   issueManual(d: ManualDraft, source: 'MANUAL' = 'MANUAL'): string {
+    const fields = {
+      target: d.target,
+      action: d.action,
+      ...(d.location ? { location: d.location } : {}),
+      ...(d.supportPartyIds?.length ? { supportPartyIds: d.supportPartyIds } : {}),
+      source,
+    };
     const id = this.tracker.request(
-      {
-        type: 'command.issue',
-        target: d.target,
-        action: d.action,
-        ...(d.location ? { location: d.location } : {}),
-        source,
-      },
+      d.correctsId
+        ? { type: 'command.correct', correctsId: d.correctsId, ...fields }
+        : { type: 'command.issue', ...fields },
       describeDraft(d, this.parties),
     );
     this.metrics.issuedManual();

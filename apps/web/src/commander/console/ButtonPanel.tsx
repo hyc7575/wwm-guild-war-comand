@@ -82,6 +82,33 @@ export function ButtonPanel({ state, dispatch, locations, instant, onInstantChan
           ))}
         </Group>
 
+        {state.action === 'SUPPORT' && (
+          <Group gap="xs" role="group" aria-label="지원 대상">
+            <Text w={36} size="sm" c="dimmed">
+              지원
+            </Text>
+            {parties.map((p) => {
+              const on = state.supportPartyIds.includes(p.id);
+              return (
+                <Button
+                  key={p.id}
+                  size="md"
+                  variant={on ? 'filled' : 'default'}
+                  aria-pressed={on}
+                  style={{ ...partyColorStyle(p), borderBottom: '3px solid var(--party-color)' }}
+                  onClick={() => dispatch({ type: 'toggleSupport', id: p.id })}
+                  data-testid={`console-support-${p.number}`}
+                >
+                  {p.number}
+                </Button>
+              );
+            })}
+            <Text size="xs" c="dimmed">
+              지원할 파티 (선택)
+            </Text>
+          </Group>
+        )}
+
         <Group gap="xs" role="group" aria-label="위치">
           <Text w={36} size="sm" c="dimmed">
             위치

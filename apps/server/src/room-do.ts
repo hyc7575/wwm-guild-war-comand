@@ -53,6 +53,8 @@ const CLOSE_RATE = 4008;
 const CLOSE_ROOM = 4002;
 const CLOSE_STALE = 4009;
 
+const STT_TYPE_RE = /"type"\s*:\s*"stt\.(?:feed|status)"/;
+
 const REQUEST_TYPES = new Set([
   'command.issue',
   'command.correct',
@@ -71,6 +73,8 @@ export class RoomDO extends DurableObject<Env> {
   private lastMsgAt = new Map<string, number>();
   private lastPresenceAt = 0;
   private presenceTimer: ReturnType<typeof setTimeout> | null = null;
+  /** No COMMANDER_ABSENT close before this: sockets are gone after a restart and need time to reconnect. */
+  private readonly graceUntil = Date.now() + LIMITS.restartGraceMs;
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
@@ -78,6 +82,11 @@ export class RoomDO extends DurableObject<Env> {
     ctx.blockConcurrencyWhile(async () => {
       this.room = (await ctx.storage.get<RoomState>('room')) ?? null;
       this.stt = (await ctx.storage.get<SttState>('stt')) ?? 'OFF';
+      // Liveness ticks write this small key instead of the whole room.
+      const seen = await ctx.storage.get<number>('commanderSeenAt');
+      if (this.room && seen !== undefined) {
+        this.room.lastCommanderSeenAt = Math.max(this.room.lastCommanderSeenAt, seen);
+      }
     });
   }
 
@@ -251,6 +260,7 @@ export class RoomDO extends DurableObject<Env> {
         commanderOnline: this.commanderOnline(),
         oldestPendingHelloAt: oldest,
         now: Date.now(),
+        graceUntil: this.graceUntil,
       }),
     );
   }
@@ -265,45 +275,31 @@ export class RoomDO extends DurableObject<Env> {
         ? this.sendError(ws, 'INVALID_MESSAGE', 'binary not supported')
         : this.failAndClose(ws, 'INVALID_MESSAGE', CLOSE_PROTOCOL);
     }
-    const parsed = parseClientMessage(data);
+    const oversize = data.length > LIMITS.maxFrameLength;
 
     if (!att.helloDone) {
-      if (!parsed.ok || parsed.msg.type !== 'hello') {
+      if (oversize) return this.failAndClose(ws, 'INVALID_MESSAGE', CLOSE_PROTOCOL, 'frame too large');
+      const first = parseClientMessage(data);
+      if (!first.ok || first.msg.type !== 'hello') {
         return this.failAndClose(ws, 'INVALID_MESSAGE', CLOSE_PROTOCOL, 'first message must be hello');
       }
-      return this.onHello(ws, att, parsed.msg);
+      return this.onHello(ws, att, first.msg);
     }
 
     const now = Date.now();
     this.lastMsgAt.set(att.connectionId, now);
-    const kind = bucketKind(parsed.ok ? parsed.msg.type : undefined);
-    const bucketKey = `${att.connectionId}:${kind}`;
-    let bucket = this.buckets.get(bucketKey);
-    if (!bucket) {
-      const roleRate =
-        att.role === 'COMMANDER'
-          ? LIMITS.commanderRatePerSec
-          : att.role === 'OPERATOR' || att.role === 'SUB_COMMANDER'
-            ? LIMITS.operatorRatePerSec
-            : LIMITS.memberRatePerSec;
-      // stt.* has its own budget so a multi-clause utterance cannot starve command requests.
-      const rate = kind === 'stt' && att.role !== 'MEMBER' ? LIMITS.sttRatePerSec : roleRate;
-      bucket = new TokenBucket(rate, now);
-      this.buckets.set(bucketKey, bucket);
+    // Rate limiting runs before JSON.parse so a flood of frames costs a regex, not a parse. The kind
+    // comes from the raw text (quotes inside string values are escaped, so a literal "type":"stt.x"
+    // can only be structural); once parsed, a mismatch is charged to the real bucket too.
+    const preKind = STT_TYPE_RE.test(data) ? 'stt' : 'cmd';
+    const cmdIdOf = (): string | undefined => (oversize ? undefined : peekClientCmdId(data));
+    if (!this.takeToken(att, preKind, now)) return this.rateLimited(ws, att, now, cmdIdOf());
+    if (oversize) return this.sendError(ws, 'INVALID_MESSAGE', 'frame too large');
+    const parsed = parseClientMessage(data);
+    if (parsed.ok && bucketKind(parsed.msg.type) !== preKind) {
+      if (!this.takeToken(att, bucketKind(parsed.msg.type), now)) return this.rateLimited(ws, att, now, cmdIdOf());
     }
-    const cmdId = parsed.ok
-      ? (parsed.msg as { clientCmdId?: string }).clientCmdId
-      : peekClientCmdId(data);
-    if (!bucket.take(now)) {
-      let counter = this.violations.get(att.connectionId);
-      if (!counter) {
-        counter = new ViolationCounter(LIMITS.violationDecayMs);
-        this.violations.set(att.connectionId, counter);
-      }
-      if (counter.hit(now) >= MAX_VIOLATIONS) return this.failAndClose(ws, 'RATE_LIMITED', CLOSE_RATE);
-      return this.reject(ws, 'RATE_LIMITED', cmdId);
-    }
-
+    const cmdId = parsed.ok ? (parsed.msg as { clientCmdId?: string }).clientCmdId : cmdIdOf();
     if (!parsed.ok) return this.reject(ws, 'INVALID_MESSAGE', cmdId, parsed.error);
     const msg = parsed.msg;
     if (!this.room || this.room.status !== 'OPEN') {
@@ -358,6 +354,34 @@ export class RoomDO extends DurableObject<Env> {
     await this.handleRequest(ws, att, req);
   }
 
+  private takeToken(att: Attachment, kind: 'stt' | 'cmd', now: number): boolean {
+    const bucketKey = `${att.connectionId}:${kind}`;
+    let bucket = this.buckets.get(bucketKey);
+    if (!bucket) {
+      const roleRate =
+        att.role === 'COMMANDER'
+          ? LIMITS.commanderRatePerSec
+          : att.role === 'OPERATOR' || att.role === 'SUB_COMMANDER'
+            ? LIMITS.operatorRatePerSec
+            : LIMITS.memberRatePerSec;
+      // stt.* has its own budget so a multi-clause utterance cannot starve command requests.
+      const rate = kind === 'stt' && att.role !== 'MEMBER' ? LIMITS.sttRatePerSec : roleRate;
+      bucket = new TokenBucket(rate, now);
+      this.buckets.set(bucketKey, bucket);
+    }
+    return bucket.take(now);
+  }
+
+  private rateLimited(ws: WebSocket, att: Attachment, now: number, cmdId: string | undefined): void {
+    let counter = this.violations.get(att.connectionId);
+    if (!counter) {
+      counter = new ViolationCounter(LIMITS.violationDecayMs);
+      this.violations.set(att.connectionId, counter);
+    }
+    if (counter.hit(now) >= MAX_VIOLATIONS) return this.failAndClose(ws, 'RATE_LIMITED', CLOSE_RATE);
+    return this.reject(ws, 'RATE_LIMITED', cmdId);
+  }
+
   private async handleRequest(
     ws: WebSocket,
     att: Attachment,
@@ -368,6 +392,7 @@ export class RoomDO extends DurableObject<Env> {
     const ctx = {
       now: Date.now(),
       newId: () => crypto.randomUUID().slice(0, 12),
+      role: att.role,
       ...(att.role === 'COMMANDER' || att.role === 'SUB_COMMANDER' || att.role === 'OPERATOR'
         ? { issuer: { role: att.role } }
         : {}),
@@ -556,7 +581,13 @@ export class RoomDO extends DurableObject<Env> {
       await this.commanderGone();
       this.schedulePresence();
     }
-    const reason = dueCloseReason(this.room, this.commanderOnline(), now);
+    const online = this.commanderOnline();
+    if (online) {
+      // Persist liveness each tick so a DO restart does not see an hours-old lastCommanderSeenAt.
+      this.room.lastCommanderSeenAt = now;
+      await this.ctx.storage.put('commanderSeenAt', now);
+    }
+    const reason = dueCloseReason(this.room, online, now, this.graceUntil);
     if (reason) await this.closeAll(reason);
     else await this.rescheduleAlarm();
   }

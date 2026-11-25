@@ -171,6 +171,8 @@ stateDiagram-v2
     CLOSED --> [*]: 서버 데이터 삭제
 ```
 
+- 메인오더가 접속해 있는 동안 서버는 10초마다 마지막 접속 시각을 저장한다. Durable Object가 재시작돼 소켓이 0개가 되어도 이 시각이 최신이라 방이 바로 닫히지 않는다. 그래도 저장 시각이 오래된 채 깨어나는 경우를 위해, 재시작 뒤 60초 안에는 "메인오더 미접속"으로 닫지 않는다.
+- 서브오더·운영자의 접속은 방 수명에 영향이 없다. `presence.commanderOnline`은 메인오더 연결만 본다.
 - 방이 닫히면 서버는 모든 연결에 `room.closed`를 보내고 저장한 상태를 지운다.
 - 방을 닫기 직전, 메인오더 브라우저는 세션 요약을 로컬에 저장한다 ([F07](features/F07-command-state.md)).
 
@@ -183,17 +185,19 @@ stateDiagram-v2
 
 | type | 보내는 사람 | 필드 | 설명 |
 |---|---|---|---|
-| `hello` | 모두 | `roomCode`, `clientId`, `role`, `commanderToken?`, `lastSeq?`, `nickname?` | 연결 직후 처음 보내는 메시지. `lastSeq`가 있으면 재접속으로 본다 |
+| `hello` | 모두 | `roomCode`, `clientId`, `role`, `commanderToken?`, `operatorToken?`, `subCommanderToken?`, `lastSeq?`, `nickname?` | 연결 직후 처음 보내는 메시지. `role`에 맞는 토큰을 하나 보낸다(`MEMBER`는 없음). 틀리거나 없으면 `UNAUTHORIZED`. `lastSeq`가 있으면 재접속으로 본다. 프레임 길이가 8192자(UTF-16 단위)를 넘으면 `INVALID_MESSAGE` |
 | `party.select` | 모두 | `partyId \| null` | 내 파티 선택 |
 | `ping` | 모두 | `t` | 연결 확인 (15초 간격 [제안]) |
-| `command.issue` | 메인오더 | `clientCmdId`, `target`, `action`, `location?`, `supportPartyIds?`, `source`, `transcript?`, `confidence?` | 명령 발행 |
-| `command.correct` | 메인오더 | `clientCmdId`, `correctsId`, 바뀐 필드 | 정정 |
-| `command.cancel` | 메인오더 | `commandId`, `reason` | 취소 |
+| `command.issue` | 메인오더·서브오더·운영자 | `clientCmdId`, `target`, `action`, `location?`, `supportPartyIds?`, `source`, `transcript?`, `confidence?` | 명령 발행 |
+| `command.correct` | 메인오더·서브오더·운영자 | `clientCmdId`, `correctsId`, 바뀐 필드 | 정정 |
+| `command.cancel` | 메인오더·서브오더·운영자 | `commandId`, `reason` | 취소 |
 | `parties.update` | 메인오더 | `baseVersion`, `parties` | 파티 구성 전체를 교체 |
 | `room.settings` | 메인오더 | `settings` 일부 | 방 설정 변경 |
 | `room.close` | 메인오더 | — | 방 종료 |
 
-`clientCmdId`는 메인오더 브라우저가 만든 고유 ID다. 재접속 뒤 같은 메시지를 다시 보내도 서버가 한 번만 처리한다.
+명령 발행자(`issuer.role`)와 취소자(`cancelledBy`)는 서버가 연결의 인증된 역할로 채운다. 클라이언트가 보낸 값은 무시한다. `parties.update`, `room.settings`, `room.close`는 메인오더만 보낼 수 있다.
+
+`clientCmdId`는 요청을 보내는 브라우저가 만든 고유 ID다. 재접속 뒤 같은 메시지를 다시 보내도 서버가 한 번만 처리한다.
 
 ### 6.2 서버 → 클라이언트
 
@@ -219,12 +223,14 @@ stateDiagram-v2
 | code | 상황 |
 |---|---|
 | `ROOM_NOT_FOUND` | 방 코드가 없거나 닫혔다 |
-| `ROOM_FULL` | 접속 인원 상한 |
-| `FORBIDDEN` | 동맹원이 메인오더 전용 메시지를 보냈다 |
+| `ROOM_FULL` | 접속 인원 상한. 메인오더를 뺀 모든 연결(서브오더·운영자·동맹원)을 센다 |
+| `FORBIDDEN` | 권한 없는 역할이 보냈다. 동맹원의 `command.*`와 모든 관리 요청, 서브오더·운영자의 `parties.update`·`room.settings`·`room.close`·`stt.*`. 서버(`room-do`)와 `room-core`가 둘 다 막고, `room-core`는 역할이 없으면 거절한다 |
 | `RATE_LIMITED` | 요청 빈도 초과 |
 | `VERSION_CONFLICT` | `parties.update`의 `baseVersion`이 오래됐다 |
 | `INVALID_MESSAGE` | 형식 검증 실패 |
 | `UNKNOWN_PARTY` | 없는 파티를 대상으로 지정했다 |
+| `UNKNOWN_COMMAND` | 없는 명령을 정정·취소하려 했다 |
+| `UNAUTHORIZED` | `hello`의 토큰이 없거나 틀렸다 |
 
 ## 7. 제한 값 [제안]
 
@@ -236,5 +242,7 @@ stateDiagram-v2
 | 방 최대 유지 | 4시간 | 동맹전 한 판과 준비 시간 |
 | 메인오더 미접속 종료 | 30분 | 메인오더 브라우저가 죽어도 방이 남지 않게 한다 |
 | 보관 명령 수 | 50건 | 이력 화면과 스냅샷 크기 |
+| 스냅샷의 원문 포함 명령 | 최근 6건 | 최악 조건(파티 12개, 명령 50건 전부 발행자·원문 200자 포함)에서 32KB 이하 유지. 10건이면 34KB를 넘는다 |
+| 수신 프레임 길이 | 8192자 | JSON 파싱 전에 검사. 가장 큰 정상 메시지(`stt.feed` 20건 x 200자)도 이 안이다 |
 | 파티 수 | 1~12 | HUD에 한 번에 보일 수 있는 수 |
 | 파티 이름 | 10자 | HUD 표시 폭 |

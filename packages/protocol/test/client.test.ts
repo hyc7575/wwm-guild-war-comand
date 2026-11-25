@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { parseClientMessage, PING_STRING, PONG_STRING } from '../src';
+import { LIMITS, parseClientMessage, PING_STRING, PONG_STRING } from '../src';
 
 const j = (o: unknown) => JSON.stringify(o);
 const ok = (o: unknown) => parseClientMessage(j(o)).ok;
@@ -58,5 +58,23 @@ describe('client messages', () => {
     const m = JSON.parse(JSON.stringify(valid["parties.update"])) as any;
     m.parties = Array.from({ length: 13 }, (_, i) => ({ id: `p${i}`, number: 1, aliases: [], color: 'p1' }));
     expect(ok(m)).toBe(false);
+  });
+});
+
+describe('sub-commander hello', () => {
+  const hello = (extra: object) => ({ v: 1, type: 'hello', roomCode: 'ABC234', clientId: 'c1', ...extra });
+  it('accepts SUB_COMMANDER with subCommanderToken', () => {
+    expect(ok(hello({ role: 'SUB_COMMANDER', subCommanderToken: 'tok' }))).toBe(true);
+    expect(ok(hello({ role: 'OPERATOR', operatorToken: 'tok' }))).toBe(true);
+  });
+  it('rejects empty or oversized tokens', () => {
+    expect(ok(hello({ role: 'SUB_COMMANDER', subCommanderToken: '' }))).toBe(false);
+    expect(ok(hello({ role: 'SUB_COMMANDER', subCommanderToken: 'x'.repeat(129) }))).toBe(false);
+    expect(ok(hello({ role: 'SUB_COMMANDER', subCommanderToken: 5 }))).toBe(false);
+  });
+  it('exposes a frame length cap above the largest legitimate frame', () => {
+    const feed = { v: 1, type: 'stt.feed', entries: Array.from({ length: LIMITS.sttFeedMaxEntries }, (_, i) => ({ id: `e${i}`, at: 1, text: '가'.repeat(LIMITS.transcriptMax), outcome: 'ISSUED' })) };
+    expect(LIMITS.maxFrameLength).toBe(8192);
+    expect(JSON.stringify(feed).length).toBeLessThan(LIMITS.maxFrameLength);
   });
 });

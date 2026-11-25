@@ -65,7 +65,7 @@ export function GuidePage() {
           <Section id="party" title="2. 내 파티 고르기">
             <ul>
               <li>처음 들어오면 <strong>어느 파티인가요?</strong> 화면이 나옵니다. 내 파티를 누릅니다.</li>
-              <li>잘 모르겠으면 <strong>아직 모름</strong>을 누르세요. 전체 명령만 보입니다.</li>
+              <li>잘 모르겠으면 <strong>아직 모름</strong>을 누르세요. 모든 파티의 명령 상태가 같은 크기의 격자로 보이니, 내 파티를 찾아 확인하면 됩니다.</li>
               <li>바꾸려면 위쪽의 <strong>내 파티 ▼</strong>를 누르고 다시 고릅니다.</li>
               <li>파티를 잘못 고르면 남의 명령을 보게 됩니다. 꼭 확인하세요.</li>
             </ul>

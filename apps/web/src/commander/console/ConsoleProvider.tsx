@@ -1,8 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, useSyncExternalStore, type ReactNode } from 'react';
-import type { CommandDraft } from '@winds/parser';
 import { useRoomSession } from '../../net/RoomSession';
 import { useRoomStore } from '../../state/roomStore';
-import type { Candidate, PipelineSnapshot, SubtitleLine } from '../pipeline/CommandPipeline';
+import type { Candidate, EditedDraft, PipelineSnapshot, SubtitleLine } from '../pipeline/CommandPipeline';
 import { SessionMetrics } from '../metrics';
 import { SessionSummaryCollector, type CollectorSource } from '../summary/collector';
 import { defaultSummaryStore } from '../summary/store';
@@ -23,13 +22,14 @@ export function ConsoleControllerProvider({ controller, children }: { controller
 }
 
 /** Creates the per-room controller from the RoomSession client and the zustand store. */
-export function ConsoleProvider({ children }: { children: ReactNode }) {
+export function ConsoleProvider({ children, mode }: { children: ReactNode; mode?: 'commander' | 'operator' }) {
   const { client } = useRoomSession();
   const [controller, setController] = useState<ConsoleController | null>(null);
   useEffect(() => {
     const metrics = new SessionMetrics();
     const roomCode = useRoomStore.getState().roomCode;
-    const summary = roomCode
+    // Only the commander tab records the session summary: operator/sub-order tabs of the same room would overwrite its temp save.
+    const summary = roomCode && mode === 'commander'
       ? new SessionSummaryCollector({
           roomCode,
           source: useRoomStore as unknown as CollectorSource,
@@ -50,7 +50,7 @@ export function ConsoleProvider({ children }: { children: ReactNode }) {
       c.dispose();
       setController(null);
     };
-  }, [client]);
+  }, [client, mode]);
   if (!controller) return null;
   return <Ctx.Provider value={controller}>{children}</Ctx.Provider>;
 }
@@ -64,7 +64,7 @@ export interface CommandPipelineApi {
   candidates: Candidate[];
   publishCandidate(id: string): void;
   /** Removes the candidate and returns the draft the button panel should show. */
-  editCandidate(id: string): Partial<CommandDraft> | undefined;
+  editCandidate(id: string): EditedDraft | undefined;
   dismissCandidate(id: string): void;
 }
 

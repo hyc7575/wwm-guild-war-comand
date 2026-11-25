@@ -57,7 +57,7 @@
 |---|---|
 | 오류 응답 | 권한·형식 오류는 `error` 메시지, 규칙 오류(VERSION_CONFLICT, UNKNOWN_PARTY, UNKNOWN_COMMAND)는 `ack.error` |
 | 오류 코드 추가 | `UNKNOWN_COMMAND`(없는 명령 ID), `UNAUTHORIZED`(토큰 불일치) |
-| `presence.total` | 메인오더를 뺀 접속 수(동맹원 + 운영자) |
+| `presence.total` | 메인오더를 뺀 접속 수(동맹원 + 서브오더 + 운영자) |
 | 같은 clientId 재접속 | 이전 소켓을 닫아 인원 상한에 두 번 세지 않는다 |
 | 한계 | 빈도 제한 버킷과 presence 타이머는 DO가 잠들면 초기화된다. presence 타이머가 변경 뒤 최대 2초 DO를 깨워 둔다. hello를 보내지 않는 소켓의 시간 제한은 아직 없다 |
 | pnpm 11 | 의존성 빌드 스크립트를 기본으로 막는다. `pnpm-workspace.yaml`의 `allowBuilds`에 `esbuild`, `workerd`만 허용했다 |
@@ -139,7 +139,7 @@
 | 메인오더 반쯤 끊긴 연결 | 메인오더가 붙어 있는 동안 10초 alarm으로 자동 응답 시각을 확인, 25초 넘게 조용하면 끊김 처리(종료 코드 4009). 비용: 메인오더 접속 중에는 DO가 잠들지 못한다. 4시간 방 최악 약 1,800 GB-s |
 | hello 시간 제한 | 10초 안에 hello가 없으면 소켓을 닫는다. 없는·닫힌 방 WebSocket은 HTTP 404 |
 | 같은 브라우저 탭 | 같은 clientId·같은 역할만 교체(`session.replaced`). 운영자 탭과 동맹원 탭은 공존 |
-| 스냅샷 원문 | 최근 10건만 원문 포함 (최악 조건 32KB 이하 유지. 20건이면 약 33KB) |
+| 스냅샷 원문 | 최근 6건만 원문 포함 (검수 2회차 후 10→6. 서브오더 issuer 포함 최악 조건 실측 약 31.9KB, 한도 32KB) |
 | 세션 요약 | `PARTY_REMOVED` 취소는 취소 지표에서 뺀다. 새로고침 뒤 같은 방의 임시 저장본에 이어서 센다 |
 | 배포 설정 분리 | 정적 자산 설정은 `apps/server/wrangler.deploy.jsonc`에만 둔다. `wrangler.jsonc`에 넣으면 `web/dist`가 없을 때 wrangler dev·통합·E2E 테스트가 시작되지 않는다 |
 | STT Worker | Worker·Worklet은 문자열 소스로 만든 Blob URL. 엄격한 CSP를 쓰면 `worker-src blob:`, `wasm-unsafe-eval`이 필요하다 |
@@ -274,3 +274,21 @@ CORS 응답은 `*` 대신 허용된 Origin을 되돌리고 `Vary: Origin`을 붙
 **HTTP 빈도 제한** (`vars.HTTP_RATE_LIMIT`=`생성,조회`, IP별 메모리 고정 1분 창, 초과 429 + Retry-After): `POST /api/rooms` 분당 10, `GET /api/rooms/:code`와 WebSocket 업그레이드는 한 몫으로 분당 300 [제안값, 처음 60에서 NAT 30명 입장을 고려해 올림]. 개발(`wrangler.jsonc`)은 100000으로 풀었다. 로컬 테스트·E2E가 loopback 한 IP에서 많이 호출하기 때문이다. 이유: 방 코드 대입(검수 #14)을 늦추려는 것이다. 한계: isolate마다 따로 세고 재시작하면 초기화된다. 완전한 방어가 아니며, 완전한 방어는 Cloudflare Rate Limiting 규칙이다. 한 NAT 뒤 30명 동시 입장은 조회 60/분에 걸려 배포 기본값을 300으로 했다. 실전 뒤 조정한다.
 
 **검증:** 순수 함수 단위 테스트(`apps/server/test/helpers.test.ts`), 통합 테스트(기본 vars로 개발 정책, 두 번째 서버를 `--var ALLOWED_ORIGINS`, `HTTP_RATE_LIMIT:2,3`으로 띄워 목록 정책·403·429·WebSocket 403/429 확인). 배포 설정(`wrangler.deploy.jsonc`)의 `ALLOWED_ORIGINS` 예시 값은 배포 전에 실제 도메인으로 바꿔야 한다(사람 작업).
+
+## 검수 2회차 결과 (2026-11-26)
+
+opus 검수 2건(서버·프로토콜, 웹·파서·STT)에서 major 7·minor 약 17건 지적 → 반영 완료. 결정과 한계만 남긴다.
+
+| 영역 | 결정 / 한계 |
+|---|---|
+| DO 재시작 | 메인오더 접속 중 10초 틱마다 `commanderSeenAt` 키만 저장 + 인스턴스 시작 후 60초(`restartGraceMs`)는 COMMANDER_ABSENT로 닫지 않는다. 유예 기준이 인스턴스 메모리라 hibernation 복귀마다 새 유예가 생긴다(닫는 시점이 늦어질 뿐) |
+| 권한 | room-core `Ctx.role` 필수. 역할이 없거나 MEMBER면 모든 요청 FORBIDDEN (열린 실패 제거) |
+| 프레임 | `maxFrameLength` 8192(`string.length`. 한글 원문 stt.feed가 정상 범위여야 해서 바이트 아님). 파싱 전 길이·빈도 검사 |
+| HTTP 404 | 없는 방 조회는 별도 `miss` 버킷(IP당 분당 20). DO를 만들어 봐야 존재를 알 수 있어 404 뒤에 센다. 비용: 한도를 쓴 IP는 1분간 정상 조회도 429 |
+| Origin | 요청 자신의 출처는 목록과 무관하게 항상 허용(목록은 추가 출처). 자리표시 값을 안 바꿔도 전면 장애가 나지 않는다 |
+| 파서 | 부정("하지마/안 돼/중지/금지")과 "…말고"로 끝나 슬롯이 없는 발화는 NONE. 전체+파티 혼합("다들 1파티 쪽으로")·"파티한테/쪽으로"는 MEDIUM. 취소는 단독 발화이거나 대상·행동이 직전 명령과 같을 때만. 골든 229건(알려진 실패 3), 재현율·정밀도 100%·오발행 0% (여전히 낙관적). 한계: "1파티 모여 취소"처럼 사전에 없는 취소 표현은 새 명령으로 처리 |
+| 닫힌 방 재접속 | WS 업그레이드 404가 이어지면(3회) `GET /api/rooms/:code`로 확인하고 404면 CLOSED(`ROOM_NOT_FOUND`). 방 확인은 `checkRoom` 콜백 주입 |
+| 수동 발행 | `supportPartyIds`를 초안·후보 [수정]·미리보기에 반영, 버튼 패널에 지원 대상 선택 |
+| KR3 지표 | 취소 사유(MISRECOGNIZED/CHANGED)는 취소자와 무관하게 센다. `byOthers`는 취소자 집계로 따로 둔다. `issued.voice`는 `command.issued/corrected` 이벤트의 `source===VOICE`로 센다. 요약 수집기는 메인오더 화면에서만 만든다 |
+| 음성 정정 | CORRECT 후보 [수정]은 `correctsId` 유지. 한계: 한 문장에 명령이 여러 건이면 "방금 거 취소"는 마지막 명령만 취소 |
+| 미반영 | 클라이언트 ping이 Chrome 백그라운드 타이머 제한(분당 1회)에 걸리면 25초 끊김 판정이 반복될 수 있다 → 실기기 확인 필요(P-2 계열, 사람 작업). ping을 Worker 타이머로 옮기는 것은 하지 않았다 |

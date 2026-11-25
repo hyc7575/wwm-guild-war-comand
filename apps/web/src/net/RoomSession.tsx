@@ -1,6 +1,7 @@
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 import type { PartyId, Role } from '@winds/protocol';
 import { wsUrl } from '../config';
+import { getRoom } from './api';
 import { useRoomStore } from '../state/roomStore';
 import { RoomClient } from './RoomClient';
 import { getClientId, loadNickname, loadPartyChoice, savePartyChoice } from './session';
@@ -42,6 +43,7 @@ export function RoomSession({ code, role, token, children }: Props) {
       role,
       token,
       nickname: role === 'MEMBER' ? loadNickname() || undefined : undefined,
+      checkRoom: async () => ((await getRoom(code)).kind === 'not-found' ? 'NOT_FOUND' : 'UNKNOWN'),
       handlers: {
         onStatus: (s, r) => useRoomStore.getState().setConnection(s, r),
         onMessage: (m) => useRoomStore.getState().receive(m),

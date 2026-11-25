@@ -33,7 +33,7 @@ export default {
     const path = url.pathname;
     if (!path.startsWith('/api/')) return new Response('Not found', { status: 404 });
     const origin = request.headers.get('origin');
-    if (!isOriginAllowed(origin, url.host, parseAllowedOrigins(env.ALLOWED_ORIGINS))) {
+    if (!isOriginAllowed(origin, url.origin, parseAllowedOrigins(env.ALLOWED_ORIGINS))) {
       return json({ error: 'FORBIDDEN_ORIGIN' }, 403, { vary: 'Origin' });
     }
     const cors = corsHeaders(origin);
@@ -70,17 +70,30 @@ async function route(request: Request, env: Env, url: URL, cors: Record<string, 
     if (m && request.method === 'GET') {
       const rl = limited('read');
       if (rl) return rl;
-      const code = normalizeRoomCode(decodeURIComponent(m[1]!));
-      if (!isValidRoomCode(code)) return json({ error: 'ROOM_NOT_FOUND' }, 404);
+      // A Durable Object cannot be probed for existence without instantiating it, so lookups of
+      // rooms that turn out not to exist are counted in their own bucket; once it is spent we
+      // refuse before touching a DO.
+      const wait = limiter.blocked(ip, 'miss', limits.miss, Date.now());
+      if (wait) return json({ error: 'RATE_LIMITED' }, 429, { 'retry-after': String(wait) });
+      const notFound = (): Response => limited('miss') ?? json({ error: 'ROOM_NOT_FOUND' }, 404);
+      let raw: string;
+      try {
+        raw = decodeURIComponent(m[1]!);
+      } catch {
+        return notFound();
+      }
+      const code = normalizeRoomCode(raw);
+      if (!isValidRoomCode(code)) return notFound();
       const stub = env.ROOM.get(env.ROOM.idFromName(code));
       if (m[2]) {
         if (request.headers.get('upgrade')?.toLowerCase() !== 'websocket') {
           return new Response('Expected WebSocket upgrade', { status: 426 });
         }
-        return stub.fetch(new Request('https://room/ws', request));
+        const wsRes = await stub.fetch(new Request('https://room/ws', request));
+        return wsRes.status === 404 ? notFound() : wsRes;
       }
       const res = await stub.fetch('https://room/info');
-      if (res.status === 404) return json({ error: 'ROOM_NOT_FOUND' }, 404);
+      if (res.status === 404) return notFound();
       return json(await res.json());
     }
     return json({ error: 'NOT_FOUND' }, 404);

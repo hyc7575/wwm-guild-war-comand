@@ -1,10 +1,10 @@
 import { Button, Group, Paper, Text } from '@mantine/core';
-import type { CommandDraft } from '@winds/parser';
+import type { EditedDraft } from '../pipeline/CommandPipeline';
 import { useCommandPipeline } from './ConsoleProvider';
 import { useNow } from './useNow';
 
 /** F03 candidates (MEDIUM): one-click publish, edit into the panel, or let them expire after 10s. */
-export function CandidatesBar({ onEdit }: { onEdit(draft: Partial<CommandDraft>): void }) {
+export function CandidatesBar({ onEdit }: { onEdit(draft: EditedDraft): void }) {
   const { candidates, publishCandidate, editCandidate, dismissCandidate } = useCommandPipeline();
   const now = useNow(250);
   if (candidates.length === 0) return null;

@@ -87,7 +87,13 @@ function makeEnv() {
   return { env, state, fire };
 }
 
-function setup(opts: { role?: 'MEMBER' | 'COMMANDER' | 'SUB_COMMANDER'; token?: string } = {}) {
+function setup(
+  opts: {
+    role?: 'MEMBER' | 'COMMANDER' | 'SUB_COMMANDER';
+    token?: string;
+    checkRoom?: () => Promise<'NOT_FOUND' | 'UNKNOWN'>;
+  } = {},
+) {
   const e = makeEnv();
   const statuses: ConnectionStatus[] = [];
   const messages: ServerMessage[] = [];
@@ -102,6 +108,7 @@ function setup(opts: { role?: 'MEMBER' | 'COMMANDER' | 'SUB_COMMANDER'; token?: 
     token: opts.token,
     WebSocketImpl: FakeWS,
     env: e.env,
+    checkRoom: opts.checkRoom,
     random: () => 0.5, // jitter factor exactly 1.0
     uuid: () => `cmd-${++n}`,
     handlers: {
@@ -128,6 +135,46 @@ afterEach(() => {
 });
 
 describe('RoomClient', () => {
+  it('ends as CLOSED/ROOM_NOT_FOUND after 3 failures without welcome when the room is gone (404 upgrade)', async () => {
+    const checkRoom = vi.fn(async () => 'NOT_FOUND' as const);
+    const t = setup({ checkRoom });
+    t.client.start();
+    for (let i = 0; i < 3; i++) {
+      expect(checkRoom).not.toHaveBeenCalled();
+      t.sock().drop(); // upgrade rejected: close without ever opening
+      await vi.advanceTimersByTimeAsync(10_000);
+    }
+    expect(checkRoom).toHaveBeenCalledTimes(1);
+    expect(t.client.getStatus()).toBe('CLOSED');
+    expect(t.client.getCloseReason()).toBe('ROOM_NOT_FOUND');
+    const count = FakeWS.instances.length;
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(FakeWS.instances.length).toBe(count); // no more reconnects
+  });
+
+  it('keeps reconnecting when the room check says it still exists, and a welcome resets the counter', async () => {
+    const checkRoom = vi.fn(async () => 'UNKNOWN' as const);
+    const t = setup({ checkRoom });
+    t.client.start();
+    t.sock().drop();
+    await vi.advanceTimersByTimeAsync(10_000);
+    t.sock().drop();
+    await vi.advanceTimersByTimeAsync(10_000);
+    t.sock().open();
+    t.sock().recv(welcome());
+    t.sock().drop(); // after a welcome: not counted
+    await vi.advanceTimersByTimeAsync(10_000);
+    t.sock().drop();
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(checkRoom).not.toHaveBeenCalled();
+    t.sock().drop();
+    await vi.advanceTimersByTimeAsync(10_000);
+    t.sock().drop();
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(checkRoom).toHaveBeenCalledTimes(1);
+    expect(t.client.getStatus()).toBe('RECONNECTING');
+  });
+
   it('maps a SUB_COMMANDER token to subCommanderToken in hello', () => {
     const t = setup({ role: 'SUB_COMMANDER', token: 'subtok' });
     t.client.start();

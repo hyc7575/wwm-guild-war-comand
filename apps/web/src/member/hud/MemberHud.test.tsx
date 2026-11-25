@@ -502,11 +502,38 @@ describe('settings', () => {
     render(<MemberHud onChangeParty={() => undefined} />);
     fireEvent.click(screen.getByTestId('open-settings'));
     fireEvent.click(screen.getByLabelText('알림음'));
-    fireEvent.click(screen.getByRole('button', { name: '크게' }));
+    fireEvent.click(screen.getByRole('button', { name: '아주 크게' }));
     act(() => useHudSettings.getState().reload());
     expect(useHudSettings.getState().settings).toMatchObject({ soundOn: false, fontStep: 2 });
   });
+
+  it('font size buttons are named after their real scale', () => {
+    setup();
+    welcome();
+    render(<MemberHud onChangeParty={() => undefined} />);
+    fireEvent.click(screen.getByTestId('open-settings'));
+    fireEvent.click(screen.getByRole('button', { name: '크게' }));
+    expect(useHudSettings.getState().settings.fontStep).toBe(1);
+    fireEvent.click(screen.getByRole('button', { name: '보통' }));
+    expect(useHudSettings.getState().settings.fontStep).toBe(0);
+    expect(screen.queryByRole('button', { name: '작게' })).toBeNull();
+  });
+
+  it('drawer: focus moves in, Esc closes, focus returns to the gear', () => {
+    setup();
+    welcome();
+    render(<MemberHud onChangeParty={() => undefined} />);
+    const gear = screen.getByTestId('open-settings');
+    gear.focus();
+    fireEvent.click(gear);
+    const drawer = screen.getByTestId('settings-drawer');
+    expect(drawer.contains(document.activeElement)).toBe(true);
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(screen.queryByTestId('settings-drawer')).toBeNull();
+    expect(document.activeElement).toBe(gear);
+  });
 });
+
 
 describe('shareTranscript', () => {
   const withSetting = (on: boolean) => {

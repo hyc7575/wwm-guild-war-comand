@@ -118,6 +118,31 @@ describe('lifecycle', () => {
   });
 });
 
+describe('lifecycle: restart grace', () => {
+  const s = { expiresAt: 4 * 3600_000, lastCommanderSeenAt: 0 }; // commander last seen ages ago
+  const woke = 2 * LIMITS.commanderAbsentCloseMs; // new instance starts long after lastSeen + 30min
+  const graceUntil = woke + LIMITS.restartGraceMs;
+  it('woken with 0 sockets and a stale lastSeen: not closed at once', () => {
+    expect(dueCloseReason(s, false, woke + 1, graceUntil)).toBeNull();
+    expect(dueCloseReason(s, false, graceUntil - 1, graceUntil)).toBeNull();
+    // without the floor the room would be closed immediately (the bug)
+    expect(dueCloseReason(s, false, woke + 1)).toBe('COMMANDER_ABSENT');
+  });
+  it('the alarm is planned at the end of the grace, not 1ms from now', () => {
+    const at = planAlarm({ ...s, commanderOnline: false, oldestPendingHelloAt: null, now: woke, graceUntil });
+    expect(at).toBe(graceUntil);
+  });
+  it('after the grace it still closes; expiry still wins', () => {
+    expect(dueCloseReason(s, false, graceUntil, graceUntil)).toBe('COMMANDER_ABSENT');
+    expect(dueCloseReason({ ...s, expiresAt: woke }, false, woke, graceUntil)).toBe('EXPIRED');
+    expect(nextAlarmAt({ ...s, expiresAt: woke + 10 }, false, graceUntil)).toBe(woke + 10);
+  });
+  it('a recently seen commander keeps its normal 30 min deadline', () => {
+    const fresh = { expiresAt: 4 * 3600_000, lastCommanderSeenAt: woke - 5_000 };
+    expect(nextAlarmAt(fresh, false, graceUntil)).toBe(fresh.lastCommanderSeenAt + LIMITS.commanderAbsentCloseMs);
+  });
+});
+
 describe('review fixes: rate limiting', () => {
   it('violations decay after a quiet period', () => {
     const v = new ViolationCounter(LIMITS.violationDecayMs);
@@ -181,25 +206,29 @@ describe('origin policy', () => {
     expect(parseAllowedOrigins(undefined)).toEqual([]);
   });
   it('no Origin header is allowed', () => {
-    expect(isOriginAllowed(null, 'x.com', [])).toBe(true);
-    expect(isOriginAllowed(null, 'x.com', ['https://a.com'])).toBe(true);
+    expect(isOriginAllowed(null, 'https://x.com', [])).toBe(true);
+    expect(isOriginAllowed(null, 'https://x.com', ['https://a.com'])).toBe(true);
   });
   it('empty list: same origin or loopback only', () => {
-    expect(isOriginAllowed('https://x.com', 'x.com', [])).toBe(true);
-    expect(isOriginAllowed('http://localhost:5180', 'localhost:8798', [])).toBe(true);
-    expect(isOriginAllowed('http://127.0.0.1:5173', 'x.com', [])).toBe(true);
-    expect(isOriginAllowed('http://[::1]:5173', 'x.com', [])).toBe(true);
-    expect(isOriginAllowed('https://evil.com', 'x.com', [])).toBe(false);
-    expect(isOriginAllowed('https://x.com:8443', 'x.com', [])).toBe(false);
-    expect(isOriginAllowed('not a url', 'x.com', [])).toBe(false);
-    expect(isOriginAllowed('null', 'x.com', [])).toBe(false);
+    expect(isOriginAllowed('https://x.com', 'https://x.com', [])).toBe(true);
+    expect(isOriginAllowed('http://localhost:5180', 'http://localhost:8798', [])).toBe(true);
+    expect(isOriginAllowed('http://127.0.0.1:5173', 'https://x.com', [])).toBe(true);
+    expect(isOriginAllowed('http://[::1]:5173', 'https://x.com', [])).toBe(true);
+    expect(isOriginAllowed('https://evil.com', 'https://x.com', [])).toBe(false);
+    expect(isOriginAllowed('https://x.com:8443', 'https://x.com', [])).toBe(false);
+    expect(isOriginAllowed('http://x.com', 'https://x.com', [])).toBe(false); // scheme differs
+    expect(isOriginAllowed('not a url', 'https://x.com', [])).toBe(false);
+    expect(isOriginAllowed('null', 'https://x.com', [])).toBe(false);
   });
-  it('list: only listed origins', () => {
+  it('list adds origins; the request own origin is always allowed', () => {
     const l = ['https://a.com'];
-    expect(isOriginAllowed('https://a.com', 'x.com', l)).toBe(true);
-    expect(isOriginAllowed('https://A.com', 'x.com', l)).toBe(true);
-    expect(isOriginAllowed('http://localhost:5173', 'localhost:5173', l)).toBe(false);
-    expect(isOriginAllowed('https://b.com', 'x.com', l)).toBe(false);
+    expect(isOriginAllowed('https://a.com', 'https://x.com', l)).toBe(true);
+    expect(isOriginAllowed('https://A.com', 'https://x.com', l)).toBe(true);
+    expect(isOriginAllowed('https://x.com', 'https://x.com', l)).toBe(true); // same origin, not in list
+    expect(isOriginAllowed('http://x.com', 'https://x.com', l)).toBe(false); // scheme compared
+    expect(isOriginAllowed('https://x.com:8443', 'https://x.com', l)).toBe(false);
+    expect(isOriginAllowed('http://localhost:5173', 'https://x.com', l)).toBe(false);
+    expect(isOriginAllowed('https://b.com', 'https://x.com', l)).toBe(false);
   });
   it('cors headers echo the origin and vary', () => {
     expect(corsHeaders('https://a.com')['access-control-allow-origin']).toBe('https://a.com');
@@ -210,9 +239,10 @@ describe('origin policy', () => {
 
 describe('http rate limit', () => {
   it('parses limits with fallback', () => {
-    expect(parseHttpLimit('5,20')).toEqual({ create: 5, read: 20 });
-    expect(parseHttpLimit(undefined)).toEqual({ create: 10, read: 60 });
-    expect(parseHttpLimit('x,-1')).toEqual({ create: 10, read: 60 });
+    expect(parseHttpLimit('5,20')).toEqual({ create: 5, read: 20, miss: 20 });
+    expect(parseHttpLimit('5,20,7')).toEqual({ create: 5, read: 20, miss: 7 });
+    expect(parseHttpLimit(undefined)).toEqual({ create: 10, read: 60, miss: 20 });
+    expect(parseHttpLimit('x,-1')).toEqual({ create: 10, read: 60, miss: 20 });
   });
   it('counts per ip and kind per window, with Retry-After', () => {
     const l = new HttpRateLimiter(60_000);
@@ -222,5 +252,15 @@ describe('http rate limit', () => {
     expect(l.check('b', 'create', 2, 2000)).toBe(0);
     expect(l.check('a', 'read', 2, 2000)).toBe(0);
     expect(l.check('a', 'create', 2, 60_000)).toBe(0);
+  });
+  it('blocked() peeks without counting', () => {
+    const l = new HttpRateLimiter(60_000);
+    expect(l.blocked('a', 'miss', 2, 0)).toBe(0);
+    l.check('a', 'miss', 2, 0);
+    expect(l.blocked('a', 'miss', 2, 1000)).toBe(0);
+    l.check('a', 'miss', 2, 1000);
+    expect(l.blocked('a', 'miss', 2, 2000)).toBe(58);
+    expect(l.blocked('b', 'miss', 2, 2000)).toBe(0);
+    expect(l.blocked('a', 'miss', 2, 60_000)).toBe(0);
   });
 });

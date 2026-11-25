@@ -42,6 +42,9 @@ export interface Candidate {
   patch?: Partial<CommandDraft>;
 }
 
+/** What the button panel is filled with when a candidate is edited. correctsId is set for CORRECT candidates. */
+export type EditedDraft = Partial<CommandDraft> & { correctsId?: string };
+
 export interface PipelineSnapshot {
   subtitles: SubtitleLine[];
   partial: string;
@@ -162,15 +165,24 @@ export class CommandPipeline {
   }
 
   /** Removes the candidate and returns what the button panel should be filled with. */
-  editCandidate(id: string): Partial<CommandDraft> | undefined {
+  editCandidate(id: string): EditedDraft | undefined {
     const c = this.snap.candidates.find((x) => x.id === id);
     if (!c) return undefined;
     this.removeCandidate(id);
     if (c.kind === 'ISSUE') return c.draft;
     const base = this.deps.getState().commands[c.correctsId ?? ''];
     return {
-      ...(base ? { target: base.target, action: base.action, location: base.location } : {}),
+      ...(base
+        ? {
+            target: base.target,
+            action: base.action,
+            location: base.location,
+            ...(base.supportPartyIds?.length ? { supportPartyIds: base.supportPartyIds } : {}),
+          }
+        : {}),
       ...(c.patch ?? {}),
+      // Keep the link so publishing the edited candidate is still a correction (command.correct).
+      ...(c.correctsId ? { correctsId: c.correctsId } : {}),
     };
   }
 
@@ -196,7 +208,6 @@ export class CommandPipeline {
         const label = describeDraft(r.draft, parties);
         if (r.confidence === 'HIGH') {
           const id = this.issue(r.draft, this.voiceFields(text, r.confidence), label, endedAt);
-          m.issuedVoice();
           line.chips.push({ kind: 'ISSUED', label, clientCmdId: id });
           this.queueFeed(text, 'ISSUED', label);
         } else {

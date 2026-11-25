@@ -2,7 +2,6 @@
 export type CancelOrigin = 'VOICE' | 'MANUAL';
 
 export interface MetricsSink {
-  issuedVoice(): void;
   issuedManual(): void;
   candidateShown(): void;
   candidatePublished(): void;
@@ -13,7 +12,6 @@ export interface MetricsSink {
 }
 
 export interface MetricsSnapshot {
-  issuedVoice: number;
   issuedManual: number;
   candidateShown: number;
   candidatePublished: number;
@@ -23,10 +21,9 @@ export interface MetricsSnapshot {
   latencies: number[];
 }
 
-/** In-memory sink. Persisting it into a session summary is a later task. */
+/** In-memory sink. issued.voice is not here: the summary counts it from command.issued events (source VOICE). */
 export class SessionMetrics implements MetricsSink {
   private d: MetricsSnapshot = {
-    issuedVoice: 0,
     issuedManual: 0,
     candidateShown: 0,
     candidatePublished: 0,
@@ -36,9 +33,6 @@ export class SessionMetrics implements MetricsSink {
     latencies: [],
   };
 
-  issuedVoice() {
-    this.d.issuedVoice++;
-  }
   issuedManual() {
     this.d.issuedManual++;
   }
@@ -73,7 +67,6 @@ export class SessionMetrics implements MetricsSink {
 }
 
 export const NOOP_METRICS: MetricsSink = {
-  issuedVoice() {},
   issuedManual() {},
   candidateShown() {},
   candidatePublished() {},

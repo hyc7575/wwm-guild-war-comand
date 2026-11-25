@@ -22,6 +22,19 @@ describe('panelReducer', () => {
     s = panelReducer(s, { type: 'setLocation', location: right });
     expect(panelDraft(s)?.location).toBeUndefined();
   });
+  it('SUPPORT draft carries supportPartyIds; other actions drop them; prefill keeps correctsId', () => {
+    let s = panelReducer(EMPTY_PANEL, { type: 'toggleParty', id: 'p1' });
+    s = panelReducer(s, { type: 'setAction', action: 'SUPPORT' });
+    s = panelReducer(s, { type: 'toggleSupport', id: 'p2' });
+    s = panelReducer(s, { type: 'toggleSupport', id: 'p3' });
+    expect(panelDraft(s)?.supportPartyIds).toEqual(['p2', 'p3']);
+    s = panelReducer(s, { type: 'toggleSupport', id: 'p2' });
+    expect(panelDraft(s)?.supportPartyIds).toEqual(['p3']);
+    expect(panelDraft(panelReducer(s, { type: 'setAction', action: 'ATTACK' }))?.supportPartyIds).toBeUndefined();
+    expect(panelReducer(s, { type: 'prune', validPartyIds: ['p1'] }).supportPartyIds).toEqual([]);
+    const f = panelReducer(EMPTY_PANEL, { type: 'prefill', target: { kind: 'ALL' }, action: 'SUPPORT', supportPartyIds: ['p2'], correctsId: 'C1' });
+    expect(panelDraft(f)).toMatchObject({ supportPartyIds: ['p2'], correctsId: 'C1' });
+  });
   it('prefill fills target/action/location; reset empties; prune drops deleted parties', () => {
     let s = panelReducer(EMPTY_PANEL, {
       type: 'prefill',

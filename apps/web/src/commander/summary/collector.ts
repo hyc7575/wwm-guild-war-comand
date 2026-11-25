@@ -39,6 +39,7 @@ export class SessionSummaryCollector {
   private startedAt: number;
   private peakMembers = 0;
   private peakByParty: Record<string, number> = {};
+  private issuedVoice = 0;
   private cancelled = { misrecognized: 0, changed: 0 };
   private issuedByRole = { COMMANDER: 0, SUB_COMMANDER: 0, OPERATOR: 0 };
   private cancelledByOthers = { SUB_COMMANDER: 0, OPERATOR: 0 };
@@ -96,23 +97,28 @@ export class SessionSummaryCollector {
     const ev = s.lastEvent;
     if (ev && ev.seq !== this.lastSeq) {
       this.lastSeq = ev.seq;
-      if (ev.kind === 'command.issued' && ev.commandId) {
+      if ((ev.kind === 'command.issued' || ev.kind === 'command.corrected') && ev.commandId) {
+        const cmd = s.commands[ev.commandId];
+        // issued.voice comes from the event's command source, not from the local request: repeats and
+        // error responses emit no issued event, while candidate publishes and voice corrections do.
+        if (cmd?.source === 'VOICE') this.issuedVoice++;
         // Counted from the event's issuer.role only. A command without issuer (old room) is not counted by role.
-        const role = s.commands[ev.commandId]?.issuer?.role;
+        const role = ev.kind === 'command.issued' ? cmd?.issuer?.role : undefined;
         if (role) this.issuedByRole[role]++;
       }
       if (ev.kind === 'command.cancelled') {
-        // No cancelledBy = the main commander (old servers). Others are kept out of the KR3 numbers.
+        // Reason and canceller are recorded separately. The reason (MISRECOGNIZED/CHANGED) feeds KR3 whoever
+        // cancelled; the canceller tally (byOthers) only says how much of it was done by non-commanders.
+        // No cancelledBy = the main commander (old servers).
         const by = ev.cancelledBy;
         const other = by === 'SUB_COMMANDER' || by === 'OPERATOR' ? by : undefined;
         for (const id of ev.commandIds ?? []) {
           if (this.seenCancels.has(id)) continue;
           this.seenCancels.add(id);
           const reason = s.commands[id]?.cancelReason;
-          if (other) {
-            if (reason === 'MISRECOGNIZED' || reason === 'CHANGED') this.cancelledByOthers[other]++;
-          } else if (reason === 'MISRECOGNIZED') this.cancelled.misrecognized++;
+          if (reason === 'MISRECOGNIZED') this.cancelled.misrecognized++;
           else if (reason === 'CHANGED') this.cancelled.changed++;
+          if (other && (reason === 'MISRECOGNIZED' || reason === 'CHANGED')) this.cancelledByOthers[other]++;
           // PARTY_REMOVED is a structural edit, not a commander decision: not counted.
         }
       }
@@ -134,7 +140,7 @@ export class SessionSummaryCollector {
       startedAt: this.startedAt,
       endedAt: now,
       metrics: {
-        issuedVoice: m.issuedVoice + (b?.issued.voice ?? 0),
+        issuedVoice: this.issuedVoice + (b?.issued.voice ?? 0),
         issuedManual: m.issuedManual + (b?.issued.manual ?? 0),
         candidateShown: m.candidateShown + (b?.candidates.shown ?? 0),
         candidatePublished: m.candidatePublished + (b?.candidates.published ?? 0),
