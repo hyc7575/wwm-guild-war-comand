@@ -233,3 +233,48 @@ export function buildPartyLexicon(
   }
   return out;
 }
+
+// ---------------------------------------------------------------------------
+// import / export (F09 US-F09-3)
+
+export type DictionaryImportResult =
+  | { ok: true; dictionary: Dictionary; warnings: string[] }
+  | { ok: false; errors: string[] };
+
+function pathLabel(path: readonly PropertyKey[]): string {
+  return path.length ? path.map(String).join('.') : '(최상위)';
+}
+
+/**
+ * 가져온 JSON 값을 검증한다. 틀리면 어느 부분이 왜 틀렸는지 한국어 목록을 돌려준다.
+ * 버전 필드가 1이 아니면 따로 안내한다. 같은 위치 id가 두 번 나오면 거절한다.
+ * 합칠 때 영향을 주는 사항(행동 간 중복 표현)은 warnings로 알린다.
+ */
+export function validateDictionaryImport(raw: unknown): DictionaryImportResult {
+  if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) {
+    return { ok: false, errors: ['사전 JSON은 객체여야 합니다.'] };
+  }
+  const ver = (raw as { version?: unknown }).version;
+  if (ver === undefined) return { ok: false, errors: ['version 필드가 없습니다. (지원: 1)'] };
+  if (ver !== 1) return { ok: false, errors: [`지원하지 않는 사전 버전입니다: ${String(ver)} (지원: 1)`] };
+  const parsed = DictionarySchema.safeParse(raw);
+  if (!parsed.success) {
+    const errors = parsed.error.issues.slice(0, 10).map((i) => `${pathLabel(i.path)}: ${i.message}`);
+    return { ok: false, errors };
+  }
+  const d = parsed.data;
+  const ids = new Set<string>();
+  for (const l of d.locations) {
+    if (ids.has(l.id)) return { ok: false, errors: [`locations: 위치 id가 중복됩니다: ${l.id}`] };
+    ids.add(l.id);
+  }
+  const warnings = findDictionaryConflicts(d).map(
+    (c) => `"${c.expression}"이(가) 여러 행동에 있습니다: ${c.actions.join(', ')}`,
+  );
+  return { ok: true, dictionary: d, warnings };
+}
+
+/** 내보내기용 JSON 문자열. */
+export function serializeDictionary(d: Dictionary): string {
+  return JSON.stringify(d, null, 2);
+}

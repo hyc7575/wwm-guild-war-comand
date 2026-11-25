@@ -115,3 +115,30 @@ describe('buildPartyLexicon', () => {
     expect(l[0]?.partyId).toBe('p1');
   });
 });
+
+import { serializeDictionary, validateDictionaryImport } from '../src/index';
+
+describe('validateDictionaryImport', () => {
+  it('내보낸 JSON을 다시 가져오면 같은 사전', () => {
+    const d = alliance({ actions: { ATTACK: ['박아넣어'] }, disabled: ['쳐'] });
+    const r = validateDictionaryImport(JSON.parse(serializeDictionary(d)));
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.dictionary).toEqual(d);
+  });
+  it('객체가 아니거나 version이 없거나 다르면 이유와 함께 거절', () => {
+    expect(validateDictionaryImport([])).toMatchObject({ ok: false });
+    expect(validateDictionaryImport({ name: 'x' })).toEqual({ ok: false, errors: [expect.stringContaining('version')] });
+    expect(validateDictionaryImport({ version: 2, name: 'x' })).toEqual({ ok: false, errors: [expect.stringContaining('2')] });
+  });
+  it('필드 형식 오류는 경로를 보여 준다', () => {
+    const r = validateDictionaryImport({ version: 1, name: 'x', actions: { ATTACK: 'x' } });
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.errors[0]).toContain('actions.ATTACK');
+  });
+  it('위치 id 중복은 거절, 행동 간 중복은 경고', () => {
+    const loc = { id: 'N', label: '북문' };
+    expect(validateDictionaryImport({ version: 1, name: 'x', locations: [loc, loc] }).ok).toBe(false);
+    const r = validateDictionaryImport({ version: 1, name: 'x', actions: { ATTACK: ['가자'], MOVE: ['가자'] } });
+    expect(r.ok && r.warnings.length).toBe(1);
+  });
+});

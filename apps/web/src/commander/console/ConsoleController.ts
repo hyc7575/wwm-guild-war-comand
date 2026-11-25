@@ -29,7 +29,7 @@ export interface ConsoleOptions {
   store: ConsoleStore;
   tuningLog?: TuningLog;
   metrics?: MetricsSink;
-  /** Dictionary getter: the default one now, merged with the alliance dictionary (F09) later. */
+  /** Dictionary getter: built-in merged with the alliance dictionary (F09); the provider passes the store's getMerged. */
   getDictionary?: () => Dictionary;
   now?: () => number;
   /** F07 session summary collector (commander console only). */

@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { createPortal } from 'react-dom';
 import type { Party } from '@winds/protocol';
 import { useRoomStore } from '../../state/roomStore';
 import { NoticeToast } from '../../shared/NoticeToast';
@@ -15,6 +16,8 @@ import { useCardEffects } from './useCardEffects';
 import { useMemberHudModel } from './useMemberHudModel';
 import { useMediaQuery, useNow } from './useNow';
 import { useWakeLock } from './useWakeLock';
+import { CompactHud } from '../pip/CompactHud';
+import { usePipWindow } from '../pip/usePipWindow';
 import styles from './MemberHud.module.css';
 
 /** Is audio waiting for a user gesture? Any first tap also unlocks it (US-F05-2). */
@@ -49,6 +52,12 @@ export function MemberHud({ onChangeParty }: { onChangeParty(): void }) {
   const audioBlocked = useAudioBlocked(settings.soundOn);
   useWakeLock(settings.wakeLockOn && !m.closed);
 
+  const pip = usePipWindow();
+  const closePip = pip.close;
+  useEffect(() => {
+    if (m.closed) closePip();
+  }, [m.closed, closePip]);
+
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [focus, setFocus] = useState<Party | null>(null);
@@ -81,6 +90,7 @@ export function MemberHud({ onChangeParty }: { onChangeParty(): void }) {
           myPartyText={m.myParty ? (m.myParty.name ? `${m.myParty.number}파티 ${m.myParty.name}` : `${m.myParty.number}파티`) : undefined}
           onChangeParty={onChangeParty}
           onOpenSettings={() => setSettingsOpen(true)}
+          onOpenPip={pip.supported && !pip.win ? () => void pip.open() : undefined}
         />
         {m.connection === 'RECONNECTING' && (
           <div className={styles.band} data-tone="warn" data-testid="banner-reconnecting" role="alert">
@@ -104,7 +114,40 @@ export function MemberHud({ onChangeParty }: { onChangeParty(): void }) {
         )}
       </div>
 
-      {!m.hasSnapshot ? (
+      {pip.win && (
+        <p className={styles.hint} data-testid="pip-active">
+          작은 창으로 표시 중입니다.{' '}
+          <button type="button" className={styles.toggle} data-testid="pip-close" onClick={pip.close}>
+            본 창으로 되돌리기
+          </button>
+        </p>
+      )}
+      {pip.win &&
+        createPortal(
+          <CompactHud
+            connection={m.connection}
+            hasSnapshot={m.hasSnapshot}
+            parties={m.parties}
+            myParty={m.myParty}
+            command={shownCommand}
+            original={fx.struckCommand ? null : m.original}
+            supportFrom={fx.struckCommand ? [] : m.supportFrom}
+            allLine={m.allLine}
+            now={now}
+            dimmed={m.dimmed}
+            flashing={fx.flashing}
+            pulsing={fx.pulsing}
+            struck={!!fx.struckCommand}
+            restore={fx.restore}
+            fontScale={FONT_SCALE[settings.fontStep]}
+            reducedMotion={reduced}
+            audioBlocked={audioBlocked}
+            onUnlockAudio={() => void unlockAudio()}
+            onReturn={pip.close}
+          />,
+          pip.win.document.body,
+        )}
+      {pip.win ? null : !m.hasSnapshot ? (
         <p className={styles.loading}>방 정보를 불러오는 중…</p>
       ) : (
         <div className={styles.body} data-unselected={unselected ? 'true' : undefined}>

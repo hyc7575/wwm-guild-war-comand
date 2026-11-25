@@ -5,6 +5,7 @@ import type { Candidate, EditedDraft, PipelineSnapshot, SubtitleLine } from '../
 import { SessionMetrics } from '../metrics';
 import { SessionSummaryCollector, type CollectorSource } from '../summary/collector';
 import { defaultSummaryStore } from '../summary/store';
+import { getDictionaryStore } from '../dictionary/store';
 import { ConsoleController, type ConsoleStore } from './ConsoleController';
 import type { TrackedRequest } from './IssueTracker';
 
@@ -42,6 +43,8 @@ export function ConsoleProvider({ children, mode }: { children: ReactNode; mode?
       store: useRoomStore as unknown as ConsoleStore,
       metrics,
       summary,
+      // F09: merged built-in + alliance dictionary, read on every parse so edits apply from the next utterance.
+      getDictionary: getDictionaryStore().getMerged,
     });
     void summary?.start();
     setController(c);

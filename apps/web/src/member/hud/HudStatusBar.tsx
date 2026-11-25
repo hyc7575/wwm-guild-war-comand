@@ -20,10 +20,12 @@ export interface HudStatusBarProps {
   myPartyText?: string;
   onChangeParty(): void;
   onOpenSettings(): void;
+  /** Document PiP small window; omit to hide the button (unsupported browsers) */
+  onOpenPip?(): void;
 }
 
 /** FR-F05-11 / F10 / FR-F02-10. Presentational. */
-export function HudStatusBar({ connection, hasSnapshot, presence, myPartyText, onChangeParty, onOpenSettings }: HudStatusBarProps) {
+export function HudStatusBar({ connection, hasSnapshot, presence, myPartyText, onChangeParty, onOpenSettings, onOpenPip }: HudStatusBarProps) {
   const live = connection === 'CONNECTED' && hasSnapshot;
   let commander: { text: string; tone: 'ok' | 'warn' | 'dim' } | null = null;
   if (live) {
@@ -47,6 +49,11 @@ export function HudStatusBar({ connection, hasSnapshot, presence, myPartyText, o
         </span>
       )}
       {live && <span className={styles.count}>{presence.total}명</span>}
+      {onOpenPip && (
+        <button type="button" className={styles.gear} onClick={onOpenPip} aria-label="작은 창으로 띄우기" title="작은 창으로 띄우기 (항상 위)" data-testid="open-pip">
+          ⧉
+        </button>
+      )}
       <button type="button" className={styles.gear} onClick={onOpenSettings} aria-label="설정" data-testid="open-settings">
         ⚙
       </button>

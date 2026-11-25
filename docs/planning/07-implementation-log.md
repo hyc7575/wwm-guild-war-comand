@@ -292,3 +292,17 @@ opus 검수 2건(서버·프로토콜, 웹·파서·STT)에서 major 7·minor �
 | KR3 지표 | 취소 사유(MISRECOGNIZED/CHANGED)는 취소자와 무관하게 센다. `byOthers`는 취소자 집계로 따로 둔다. `issued.voice`는 `command.issued/corrected` 이벤트의 `source===VOICE`로 센다. 요약 수집기는 메인오더 화면에서만 만든다 |
 | 음성 정정 | CORRECT 후보 [수정]은 `correctsId` 유지. 한계: 한 문장에 명령이 여러 건이면 "방금 거 취소"는 마지막 명령만 취소 |
 | 미반영 | 클라이언트 ping이 Chrome 백그라운드 타이머 제한(분당 1회)에 걸리면 25초 끊김 판정이 반복될 수 있다 → 실기기 확인 필요(P-2 계열, 사람 작업). ping을 Worker 타이머로 옮기는 것은 하지 않았다 |
+
+## Phase 2 진행 기록
+
+### P2-1 F09 동맹 사전 편집기 (2026-11-26)
+
+- 구현: 행동어·위치·별칭 편집, 기본 표현 끄기, 충돌 경고(이 행동에 둔다/기존 유지), 사전 테스트 탭, JSON 내보내기·가져오기(검토 → 덮어쓰기/합치기), 튜닝 기록 기반 추천. 위치 `apps/web/src/commander/dictionary`, 파서 `validateDictionaryImport`·`serializeDictionary`.
+- 결정: 파일 형식은 `Dictionary` JSON 그대로(`version: 1`). 동맹 사전(override)만 localStorage `winds.allianceDictionary`에 저장하고 서버로 보내지 않는다(기본 사전이 갱신돼도 호환). 에디터가 만든 위치 id는 `CUSTOM_n`. 합칠 때 `disabled`는 합집합.
+- 한계: 추천은 공백 단위 단어 빈도라 조사 붙은 형태는 따로 센다. `targetAll`·`partySuffixes`·정정어·취소어는 편집 UI 없음(가져오기로는 병합됨). 사전 테스트의 정정·취소는 대상 명령이 방에 있어야 나온다. 실제 브라우저 확인 안 함(jsdom).
+
+### P2-2 작은 창 모드 — Document Picture-in-Picture (2026-11-26)
+
+① 문제: 게임과 동시에 HUD를 보려면 알트탭이 필요하고, 모니터가 하나인 동맹원은 명령을 놓친다(프리모템 T5). ② 대안: 브라우저 탭만(가려짐), 일반 `window.open` 팝업(항상 위에 뜨지 않음), 비디오 PiP(HTML을 못 그림) — 쓰지 않음. ③ 가능해진 것: 내 파티 카드·연결 배너를 항상 위에 뜨는 작은 창으로 본다. ④ 한계: Chromium 계열만 지원(미지원 브라우저는 버튼 숨김), 게임이 독점 전체 화면이면 가려짐, 본 창이 백그라운드일 때 타이머 지연(경과 시간 갱신) 가능 → 실제 게임 위 확인 필요(사람 작업).
+- 구현: PiP 문서에 React portal로 `CompactHud` 렌더. 알림음·진동·카드 효과는 본 창 `MemberHud`가 돌리고 PiP는 결과만 받아 그린다(소리 중복 방지). 스타일시트는 cssRules 복사. 헤드리스 Chromium E2E(s10) 통과.
+- 이해 점검: 이 기술은 사용자가 위 ①~④를 직접 설명해야 하는 항목이다. 사용자가 자리를 비워 아직 설명하지 못했다. career-log에는 설명 전까지 기록하지 않는다.
