@@ -203,7 +203,11 @@ export function applyServerMessage(s: RoomData, msg: ServerMessage): RoomData {
         ...(msg.error !== undefined ? { error: msg.error } : {}),
         ...(msg.note !== undefined ? { note: msg.note } : {}),
       };
-      const next = { ...s, ackCounter: n, ackLog: [...s.ackLog, rec].slice(-ACK_LOG_MAX) };
+      // A late ack resolves an item already reported unsent.
+      const unsent = s.unsent.some((u) => u.clientCmdId === msg.clientCmdId)
+        ? s.unsent.filter((u) => u.clientCmdId !== msg.clientCmdId)
+        : s.unsent;
+      const next = { ...s, unsent, ackCounter: n, ackLog: [...s.ackLog, rec].slice(-ACK_LOG_MAX) };
       return msg.error || msg.note
         ? { ...next, lastAck: { clientCmdId: msg.clientCmdId, commandId: msg.commandId, error: msg.error, note: msg.note } }
         : next;

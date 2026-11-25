@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import { LIMITS } from '@winds/protocol';
 import { randomToken, sha256Hex, timingSafeEqual } from '../src/crypto';
-import { dueCloseReason, nextAlarmAt } from '../src/lifecycle';
+import { commanderStale, dueCloseReason, helloExpired, nextAlarmAt, planAlarm } from '../src/lifecycle';
 import { computePresence } from '../src/presence';
-import { TokenBucket } from '../src/rateLimit';
+import { TokenBucket, ViolationCounter, bucketKind, peekClientCmdId } from '../src/rateLimit';
 
 describe('crypto', () => {
   it('tokens are 32 random bytes base64url', () => {
@@ -71,5 +71,60 @@ describe('lifecycle', () => {
     expect(dueCloseReason(s, false, 1000 + LIMITS.commanderAbsentCloseMs)).toBe('COMMANDER_ABSENT');
     expect(dueCloseReason(s, true, s.expiresAt)).toBe('EXPIRED');
     expect(dueCloseReason(s, false, s.expiresAt)).toBe('EXPIRED');
+  });
+});
+
+describe('review fixes: rate limiting', () => {
+  it('violations decay after a quiet period', () => {
+    const v = new ViolationCounter(LIMITS.violationDecayMs);
+    expect(v.hit(0)).toBe(1);
+    expect(v.hit(1000)).toBe(2);
+    expect(v.hit(1000 + LIMITS.violationDecayMs + 1)).toBe(1); // reset
+    // slow trickle (one per 61s for hours) never reaches the cap
+    let n = 0;
+    for (let i = 0; i < 300; i++) n = v.hit(100_000 + i * 61_000);
+    expect(n).toBe(1);
+  });
+  it('stt.* is bucketed separately from commands', () => {
+    expect(bucketKind('stt.feed')).toBe('stt');
+    expect(bucketKind('stt.status')).toBe('stt');
+    expect(bucketKind('command.issue')).toBe('cmd');
+    expect(bucketKind(undefined)).toBe('cmd');
+    const cmd = new TokenBucket(LIMITS.commanderRatePerSec, 0);
+    const stt = new TokenBucket(LIMITS.sttRatePerSec, 0);
+    for (let i = 0; i < 5; i++) stt.take(0);
+    expect(stt.take(0)).toBe(false);
+    expect(cmd.take(0)).toBe(true); // commands unaffected by stt exhaustion
+  });
+  it('peekClientCmdId recovers the id from an invalid frame', () => {
+    expect(peekClientCmdId('{"type":"command.issue","clientCmdId":"abc"}')).toBe('abc');
+    expect(peekClientCmdId('{"clientCmdId":""}')).toBeUndefined();
+    expect(peekClientCmdId('{"clientCmdId":5}')).toBeUndefined();
+    expect(peekClientCmdId('not json')).toBeUndefined();
+  });
+});
+
+describe('review fixes: alarm multiplexing', () => {
+  const base = { expiresAt: 1_000_000_000, lastCommanderSeenAt: 0, oldestPendingHelloAt: null, now: 1000 };
+  it('ticks every 10s only while a commander socket exists', () => {
+    expect(planAlarm({ ...base, commanderOnline: true })).toBe(1000 + LIMITS.commanderLivenessTickMs);
+    // no commander: absent-close deadline, never a tick
+    expect(planAlarm({ ...base, commanderOnline: false })).toBe(LIMITS.commanderAbsentCloseMs);
+  });
+  it('expiry and hello deadlines win when earlier', () => {
+    expect(planAlarm({ ...base, commanderOnline: true, expiresAt: 3000 })).toBe(3000);
+    expect(planAlarm({ ...base, commanderOnline: false, oldestPendingHelloAt: 500 })).toBe(500 + LIMITS.helloTimeoutMs);
+  });
+  it('commanderStale: fresh auto-response or message keeps it alive; >25s silence kills', () => {
+    const now = 100_000;
+    expect(commanderStale(now - 15_000, null, 0, now)).toBe(false);
+    expect(commanderStale(null, now - 24_000, 0, now)).toBe(false);
+    expect(commanderStale(now - 26_000, now - 40_000, now - 50_000, now)).toBe(true);
+    expect(commanderStale(null, null, now - 5_000, now)).toBe(false); // just connected
+    expect(commanderStale(null, null, now - 26_000, now)).toBe(true);
+  });
+  it('helloExpired at 10s', () => {
+    expect(helloExpired(0, 9_999)).toBe(false);
+    expect(helloExpired(0, 10_000)).toBe(true);
   });
 });

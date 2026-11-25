@@ -5,7 +5,7 @@ import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import WebSocket from 'ws';
 
-const PORT = 8799;
+const PORT = Number(process.env.WINDS_TEST_PORT ?? 8799);
 const BASE = `http://127.0.0.1:${PORT}`;
 const WS_BASE = `ws://127.0.0.1:${PORT}`;
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -16,6 +16,9 @@ class Client {
   ws!: WebSocket;
   msgs: Msg[] = [];
   closed = false;
+  closeCode = 0;
+  noPing = false;
+  private pinger: ReturnType<typeof setInterval> | null = null;
   private waiters: { pred: (m: Msg) => boolean; res: (m: Msg) => void }[] = [];
   private chain: Promise<void> = Promise.resolve();
   /** min ms between sends; commanders pace themselves under the 5/s limit */
@@ -27,7 +30,17 @@ class Client {
       this.msgs.push(m);
       this.waiters = this.waiters.filter((w) => (w.pred(m) ? (w.res(m), false) : true));
     });
-    this.ws.on('close', () => (this.closed = true));
+    this.ws.on('close', (code) => {
+      this.closed = true;
+      this.closeCode = code;
+      if (this.pinger) clearInterval(this.pinger);
+    });
+    // Real clients ping every 15s; the server treats a silent commander as half-open after 25s.
+    if (!this.noPing) {
+      this.pinger = setInterval(() => {
+        if (this.ws.readyState === 1) this.ws.send('{"v":1,"type":"ping"}');
+      }, 10_000);
+    }
     await new Promise<void>((res, rej) => {
       this.ws.once('open', () => res());
       this.ws.once('error', rej);
@@ -69,6 +82,7 @@ class Client {
     return this.msgs.length;
   }
   close() {
+    if (this.pinger) clearInterval(this.pinger);
     this.ws.close();
   }
 }
@@ -88,7 +102,7 @@ async function startWrangler(): Promise<ChildProcess> {
   const persist = mkdtempSync(join(tmpdir(), 'winds-wrangler-'));
   const child = spawn(
     join(root, 'node_modules/.bin/wrangler'),
-    ['dev', '--port', String(PORT), '--inspector-port', '9339', '--local', '--persist-to', persist],
+    ['dev', '--port', String(PORT), '--inspector-port', String(9339 + PORT - 8799), '--local', '--persist-to', persist],
     {
       cwd: root,
       env: { ...process.env, WRANGLER_SEND_METRICS: 'false', CI: '1' },
@@ -252,10 +266,14 @@ async function main() {
     console.log('forbidden / unauthorized / duplicate');
     const mkF = members[1]!.mark();
     members[1]!.send({ type: 'command.issue', clientCmdId: cid(), target: { kind: 'ALL' }, action: 'MOVE', source: 'MANUAL' });
-    const fb = await members[1]!.waitFor((m) => m.type === 'error' && m.code === 'FORBIDDEN');
-    check(!!fb, 'member command.issue -> FORBIDDEN');
-    members[1]!.send({ type: 'parties.update', clientCmdId: cid(), baseVersion: 1, parties: partiesNow });
-    await members[1]!.waitFor((m) => m.type === 'error' && m.code === 'FORBIDDEN', 5000, mkF + 1);
+    const fb = await members[1]!.waitFor((m) => m.type === 'ack' && m.error === 'FORBIDDEN');
+    check(!!fb.clientCmdId, 'member command.issue -> ack {clientCmdId, error: FORBIDDEN}');
+    const fb2 = cid();
+    members[1]!.send({ type: 'parties.update', clientCmdId: fb2, baseVersion: 1, parties: partiesNow });
+    check((await members[1]!.ack(fb2)).error === 'FORBIDDEN', 'member parties.update -> ack FORBIDDEN');
+    members[1]!.send({ type: 'stt.status', state: 'LISTENING' });
+    await members[1]!.waitFor((m) => m.type === 'error' && m.code === 'FORBIDDEN', 5000, mkF);
+    check(true, 'request without clientCmdId still gets error');
     const bogus = await mk('bogus').connect(code);
     bogus.send({ type: 'hello', roomCode: code, clientId: 'x', role: 'COMMANDER', commanderToken: 'wrong' });
     check((await bogus.type('error')).code === 'UNAUTHORIZED', 'wrong commander token -> UNAUTHORIZED');
@@ -285,8 +303,9 @@ async function main() {
     const opCmd = cid();
     op.send({ type: 'command.issue', clientCmdId: opCmd, target: { kind: 'ALL' }, action: 'RETREAT', source: 'MANUAL' });
     check(!!(await op.ack(opCmd)).commandId, 'operator can issue');
-    op.send({ type: 'room.close', clientCmdId: cid() });
-    await op.waitFor((m) => m.type === 'error' && m.code === 'FORBIDDEN');
+    const opClose = cid();
+    op.send({ type: 'room.close', clientCmdId: opClose });
+    check((await op.ack(opClose)).error === 'FORBIDDEN', 'operator room.close -> ack FORBIDDEN');
     cmd.send({ type: 'stt.feed', entries: [{ id: 'e1', at: Date.now(), text: '집결', outcome: 'ISSUED' }] });
     const feed = await op.type('stt.feed');
     check(feed.from === 'COMMANDER' && feed.entries.length === 1, 'stt.feed relayed to operator');
@@ -316,6 +335,41 @@ async function main() {
     await cmd.waitClosed();
     check(true, 'old commander got session.replaced and was closed');
 
+    console.log('same-browser tabs (clientId shared)');
+    const opT = await mk('opT').connect(code);
+    opT.send({ type: 'hello', roomCode: code, clientId: 'browser-1', role: 'OPERATOR', operatorToken });
+    await opT.type('welcome');
+    const memT = await mk('memT').connect(code);
+    memT.send({ type: 'hello', roomCode: code, clientId: 'browser-1', role: 'MEMBER' });
+    await memT.type('welcome');
+    await new Promise((r) => setTimeout(r, 400));
+    check(!opT.closed && !memT.closed, 'operator tab and member tab of one browser coexist');
+    check(!opT.msgs.some((m) => m.type === 'session.replaced') && !memT.msgs.some((m) => m.type === 'session.replaced'), 'no session.replaced across roles');
+    const memT2 = await mk('memT2').connect(code);
+    memT2.send({ type: 'hello', roomCode: code, clientId: 'browser-1', role: 'MEMBER' });
+    await memT2.type('welcome');
+    await memT.type('session.replaced');
+    await memT.waitClosed();
+    check(!opT.closed && !memT2.closed, 'same clientId + same role: old socket gets session.replaced, new and other-role tabs stay');
+    opT.close();
+    memT2.close();
+
+    console.log('rate limit -> ack error');
+    const opR = await mk('opR').connect(code);
+    opR.send({ type: 'hello', roomCode: code, clientId: 'opR', role: 'OPERATOR', operatorToken });
+    await opR.type('welcome');
+    const burst = Array.from({ length: 14 }, () => cid());
+    for (const id of burst) opR.send({ type: 'command.issue', clientCmdId: id, target: { kind: 'ALL' }, action: 'HOLD', source: 'MANUAL' });
+    const rlAck = await opR.waitFor((m) => m.type === 'ack' && m.error === 'RATE_LIMITED');
+    check(burst.includes(rlAck.clientCmdId), 'rate-limited request -> ack {clientCmdId, error: RATE_LIMITED}');
+    opR.close();
+
+    console.log('hello timeout');
+    const silent = await mk('silent').connect(code);
+    const t0 = Date.now();
+    await silent.waitClosed(16_000);
+    check(Date.now() - t0 >= 9000, `socket without hello closed after ~10s (${Date.now() - t0}ms)`);
+
     console.log('room.close');
     const closeMarks = [m0b.mark(), members[1]!.mark(), members[2]!.mark()];
     cmd2.send({ type: 'room.close', clientCmdId: cid() });
@@ -324,9 +378,36 @@ async function main() {
     check(rc.reason === 'COMMANDER_CLOSED', 'all connections receive room.closed');
     await new Promise((r) => setTimeout(r, 300));
     check((await api(`/api/rooms/${code}`)).status === 404, 'GET room after close -> 404');
-    const late = await mk('late').connect(code);
-    late.send({ type: 'hello', roomCode: code, clientId: 'late', role: 'MEMBER' });
-    check((await late.type('error')).code === 'ROOM_NOT_FOUND', 'hello to closed room -> ROOM_NOT_FOUND');
+    let lateRejected = false;
+    try {
+      await mk('late').connect(code);
+    } catch {
+      lateRejected = true;
+    }
+    check(lateRejected, 'WebSocket upgrade to closed/non-existent room is refused (404)');
+
+    console.log('half-open commander');
+    const created2 = await api('/api/rooms', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ parties: [{}, {}] }),
+    });
+    const r2 = (await created2.json()) as any;
+    const watcher = await mk('watcher').connect(r2.code);
+    watcher.send({ type: 'hello', roomCode: r2.code, clientId: 'w', role: 'MEMBER' });
+    await watcher.type('welcome');
+    const ghost = mk('ghost');
+    ghost.noPing = true; // never pings: looks like a dead network path to the server
+    await ghost.connect(r2.code);
+    ghost.send({ type: 'hello', roomCode: r2.code, clientId: 'g', role: 'COMMANDER', commanderToken: r2.commanderToken });
+    await ghost.type('welcome');
+    ghost.send({ type: 'stt.status', state: 'LISTENING' });
+    await watcher.waitFor((m) => m.type === 'presence' && m.commanderOnline === true && m.sttState === 'LISTENING', 6000);
+    const onMark = watcher.mark();
+    const off = await watcher.waitFor((m) => m.type === 'presence' && m.commanderOnline === false && m.sttState === 'OFF', 45_000, onMark);
+    check(!!off, 'silent commander detected: presence commanderOnline=false, sttState OFF');
+    await ghost.waitClosed(5000);
+    check(ghost.closeCode === 4009, 'stale commander socket closed (4009)');
 
     console.log(`\nALL PASSED (${passed} checks)`);
   } finally {

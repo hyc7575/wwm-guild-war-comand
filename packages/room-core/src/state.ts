@@ -199,6 +199,20 @@ function dedupTarget(t: Target): Target {
   return t.kind === 'ALL' ? t : { kind: 'PARTIES', partyIds: [...new Set(t.partyIds)] };
 }
 
+/**
+ * A command may only be treated as a repeat while it is still the current order of every party
+ * it applies to. Otherwise (e.g. "1-2 attack", "2 defend", "1-2 attack") the re-issue is a real
+ * new command. Target set: listed parties that still exist; for ALL, every party stack holding it.
+ */
+function isTopEverywhere(s: RoomState, c: Command): boolean {
+  const ids =
+    c.target.kind === 'ALL'
+      ? s.parties.map((p) => p.id).filter((id) => s.slots[id]?.includes(c.id))
+      : [...new Set(c.target.partyIds)].filter((id) => s.slots[id]);
+  if (!ids.length) return false;
+  return ids.every((id) => currentCommandId(s, id) === c.id);
+}
+
 // ---------------------------------------------------------------- issue
 
 function issueCore(
@@ -223,7 +237,8 @@ function issueCore(
         sameTarget(c.target, target) &&
         c.action === input.action &&
         sameLocation(c.location, input.location) &&
-        sameSet(c.supportPartyIds ?? [], input.supportPartyIds ?? [])
+        sameSet(c.supportPartyIds ?? [], input.supportPartyIds ?? []) &&
+        isTopEverywhere(s, c)
       ) {
         if (!found || last >= Math.max(found.issuedAt, found.repeatedAt ?? 0)) found = c;
       }
@@ -275,9 +290,19 @@ export function correctCommand(state: RoomState, input: CorrectInput, ctx: Ctx):
   const orig = state.commands.find((c) => c.id === input.correctsId);
   if (!orig) return { ok: false, error: 'UNKNOWN_COMMAND' };
 
-  const target = input.target ?? orig.target;
+  // Party ids deleted since the original was issued are dropped from inherited fields.
+  const alive = new Set(state.parties.map((p) => p.id));
+  let origTarget: Target = orig.target;
+  if (origTarget.kind === 'PARTIES') {
+    origTarget = { kind: 'PARTIES', partyIds: origTarget.partyIds.filter((id) => alive.has(id)) };
+  }
+  if (!input.target && origTarget.kind === 'PARTIES' && origTarget.partyIds.length === 0) {
+    return { ok: false, error: 'UNKNOWN_PARTY' };
+  }
+  const origSupport = orig.supportPartyIds?.filter((id) => alive.has(id));
+  const target = input.target ?? origTarget;
   const location = input.location === null ? undefined : (input.location ?? orig.location);
-  const support = input.supportPartyIds ?? orig.supportPartyIds;
+  const support = input.supportPartyIds ?? (origSupport?.length ? origSupport : undefined);
   const merged: IssueInput = {
     target,
     action: input.action ?? orig.action,
@@ -366,7 +391,7 @@ export function cancelCommand(state: RoomState, input: CancelInput, ctx: Ctx): R
     st.splice(idx, 1);
     if (wasTop && st.length) {
       const below = s.commands.find((x) => x.id === st[st.length - 1]);
-      if (!below || ctx.now - below.issuedAt >= LIMITS.cancelRestoreMaxAgeMs) s.slots[pid] = [];
+      if (!below || ctx.now - Math.max(below.issuedAt, below.repeatedAt ?? 0) >= LIMITS.cancelRestoreMaxAgeMs) s.slots[pid] = [];
     }
   }
   c.status = 'CANCELLED';
@@ -479,10 +504,13 @@ export function stripTranscript(c: Command): Command {
 const canSeeTranscript = (settings: RoomSettings, role: Role) =>
   role !== 'MEMBER' || settings.shareTranscript;
 
+/** Snapshots keep transcripts only for the newest N commands (WebSocket frame budget). */
+export const SNAPSHOT_TRANSCRIPT_COMMANDS = 10;
+
 export function toSnapshot(state: RoomState, presence: Presence, role: Role): Snapshot {
-  const commands = canSeeTranscript(state.settings, role)
-    ? clone(state.commands)
-    : state.commands.map((c) => clone(stripTranscript(c)));
+  const see = canSeeTranscript(state.settings, role);
+  const keepFrom = state.commands.length - SNAPSHOT_TRANSCRIPT_COMMANDS;
+  const commands = state.commands.map((c, i) => clone(see && i >= keepFrom ? c : stripTranscript(c)));
   return {
     seq: state.seq,
     roomCode: state.code,

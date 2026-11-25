@@ -8,6 +8,7 @@ import {
   currentCommandId,
   eventForRole,
   issueCommand,
+  SNAPSHOT_TRANSCRIPT_COMMANDS,
   toSnapshot,
   updateParties,
   updateSettings,
@@ -41,8 +42,8 @@ const CEN = { id: 'CENTER', label: '중앙' };
 const RIGHT = { id: 'RIGHT', label: '우측' };
 const cur = (s: RoomState) => s.parties.map((p) => currentCommandId(s, p.id));
 const get = (s: RoomState, id: string) => s.commands.find((c) => c.id === id)!;
-const issue = (s: RoomState, input: Parameters<typeof issueCommand>[1], now = T0) =>
-  ok(issueCommand(s, input, ctx(now)));
+const issue = (s: RoomState, input: Parameters<typeof issueCommand>[1], now = T0, id: () => string = newId) =>
+  ok(issueCommand(s, input, { now, newId: id }));
 
 describe('createRoomState', () => {
   it('assigns stable ids, empty stacks, hashes, expiry', () => {
@@ -420,5 +421,90 @@ describe('snapshot / transcript filtering', () => {
     expect(m.kind === 'command.issued' && m.payload.command.transcript).toBeUndefined();
     const c = eventForRole(ev, r.state.settings, 'COMMANDER');
     expect(c.kind === 'command.issued' && c.payload.command.transcript).toBe('x');
+  });
+});
+
+// UTF-8 byte length (BMP only; enough for Hangul + ASCII).
+const utf8Bytes = (str: string) => [...str].reduce((n, ch) => n + (ch.charCodeAt(0) < 0x80 ? 1 : ch.charCodeAt(0) < 0x800 ? 2 : 3), 0);
+
+describe('review fixes', () => {
+  const noPresence: Presence = { total: 0, byParty: {}, unassigned: 0, commanderOnline: true, operatorsOnline: 0, sttState: 'OFF' };
+
+  it('repeat: "1-2 attack", "2 defend", "1-2 attack" re-issues instead of repeating', () => {
+    let s = issue(mk(), { target: P('p1', 'p2'), action: 'ATTACK', source: 'VOICE' }).state;
+    s = issue(s, { target: P('p2'), action: 'DEFEND', source: 'VOICE' }, T0 + 2000).state;
+    const r = issue(s, { target: P('p1', 'p2'), action: 'ATTACK', source: 'VOICE' }, T0 + 4000);
+    expect(r.events[0]!.kind).toBe('command.issued');
+    expect(r.ack.note).toBeUndefined();
+    const top = currentCommandId(r.state, 'p2')!;
+    expect(get(r.state, top).action).toBe('ATTACK');
+  });
+  it('repeat: ALL X -> 3 Y -> ALL X re-issues; plain ALL X x2 still repeats', () => {
+    let s = issue(mk(), { target: ALL, action: 'GATHER', source: 'VOICE' }).state;
+    expect(issue(s, { target: ALL, action: 'GATHER', source: 'VOICE' }, T0 + 1000).ack.note).toBe('REPEATED');
+    s = issue(s, { target: P('p3'), action: 'ATTACK', source: 'VOICE' }, T0 + 2000).state;
+    const r = issue(s, { target: ALL, action: 'GATHER', source: 'VOICE' }, T0 + 4000);
+    expect(r.events[0]!.kind).toBe('command.issued');
+    expect(r.state.commands).toHaveLength(3);
+    expect(cur(r.state).every((x) => x === r.ack.commandId)).toBe(true);
+  });
+
+  it('correct: deleted party in the original target is dropped, not UNKNOWN_PARTY', () => {
+    let s = issue(mk(), { target: P('p1', 'p2'), action: 'ATTACK', source: 'VOICE' }).state;
+    const orig = s.commands[0]!.id;
+    s = ok(updateParties(s, { baseVersion: 1, parties: s.parties.filter((p) => p.id !== 'p2') }, ctx(T0 + 1000))).state;
+    const r = ok(correctCommand(s, { correctsId: orig, action: 'DEFEND', source: 'MANUAL' }, ctx(T0 + 2000)));
+    const cmd = r.state.commands.find((c) => c.id === r.ack.commandId)!;
+    expect(cmd.target).toEqual({ kind: 'PARTIES', partyIds: ['p1'] });
+  });
+  it('correct: nothing left and no patch target -> UNKNOWN_PARTY; patch target works', () => {
+    let s = issue(mk(), { target: P('p2'), action: 'ATTACK', source: 'VOICE' }).state;
+    const orig = s.commands[0]!.id;
+    s = ok(updateParties(s, { baseVersion: 1, parties: s.parties.filter((p) => p.id !== 'p2') }, ctx(T0 + 1000))).state;
+    expect(correctCommand(s, { correctsId: orig, action: 'DEFEND', source: 'MANUAL' }, ctx(T0 + 2000))).toMatchObject({ ok: false, error: 'UNKNOWN_PARTY' });
+    expect(correctCommand(s, { correctsId: orig, target: P('p1'), source: 'MANUAL' }, ctx(T0 + 2000)).ok).toBe(true);
+  });
+  it('correct: deleted support party ids are dropped', () => {
+    let s = issue(mk(), { target: P('p1'), action: 'ATTACK', supportPartyIds: ['p2', 'p3'], source: 'VOICE' }).state;
+    const orig = s.commands[0]!.id;
+    s = ok(updateParties(s, { baseVersion: 1, parties: s.parties.filter((p) => p.id !== 'p2') }, ctx(T0 + 1000))).state;
+    const r = ok(correctCommand(s, { correctsId: orig, action: 'DEFEND', source: 'MANUAL' }, ctx(T0 + 2000)));
+    expect(r.state.commands.find((c) => c.id === r.ack.commandId)!.supportPartyIds).toEqual(['p3']);
+  });
+
+  it('cancel restore age uses max(issuedAt, repeatedAt) of the command below', () => {
+    let s = issue(mk(), { target: P('p1'), action: 'GATHER', source: 'VOICE' }).state;
+    const a = s.commands[0]!.id;
+    const repeatedAt = T0 + 14 * 60_000;
+    s.commands[0]!.repeatedAt = repeatedAt;
+    const later = T0 + LIMITS.cancelRestoreMaxAgeMs + 60_000; // 16 min after issue, 2 min after repeat
+    s = issue(s, { target: P('p1'), action: 'ATTACK', source: 'VOICE' }, later - 1000).state;
+    const b = s.commands[1]!.id;
+    s = ok(cancelCommand(s, { commandId: b }, ctx(later))).state;
+    expect(s.slots.p1).toEqual([a]);
+  });
+
+  it('snapshot: worst case (50 cmds, 200 Hangul chars, 12 parties) stays under 32KB and keeps only the newest transcripts', () => {
+    let s = createRoomState({
+      code: 'ABC234', now: T0, parties: Array.from({ length: 12 }, () => ({ name: '가나다라마바사아자차', aliases: ['가나다라마바사아', '자차카타파하갸냐'] })),
+      commanderTokenHash: 'h'.repeat(64), operatorTokenHash: 'h'.repeat(64),
+    });
+    const ids = s.parties.map((p) => p.id);
+    let n = 0;
+    const longIds = () => `abcdef${String(++n).padStart(6, '0')}`; // real ids are 12 chars
+    for (let i = 0; i < LIMITS.maxCommands; i++) {
+      s = issue(s, {
+        target: ALL, action: 'ATTACK', source: 'VOICE', supportPartyIds: ids.slice(0, 3),
+        location: { id: 'CENTER', label: '가나다라마바사아자차카타파하갸냐댜랴먀뱌샤' }, confidence: 0.123456789,
+        transcript: '가'.repeat(LIMITS.transcriptMax),
+      }, T0 + i * 20_000, longIds).state;
+    }
+    expect(s.commands).toHaveLength(LIMITS.maxCommands);
+    for (const role of ['COMMANDER', 'OPERATOR'] as const) {
+      const snap = toSnapshot(s, noPresence, role);
+      expect(snap.commands.filter((c) => c.transcript !== undefined)).toHaveLength(SNAPSHOT_TRANSCRIPT_COMMANDS);
+      expect(snap.commands.slice(-SNAPSHOT_TRANSCRIPT_COMMANDS).every((c) => c.transcript !== undefined)).toBe(true);
+      expect(utf8Bytes(JSON.stringify({ type: 'welcome', snapshot: snap }))).toBeLessThan(32 * 1024);
+    }
   });
 });

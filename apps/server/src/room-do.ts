@@ -30,9 +30,9 @@ import {
 } from '@winds/room-core';
 import { sha256Hex, timingSafeEqual } from './crypto';
 import type { Env } from './env';
-import { dueCloseReason, nextAlarmAt, type CloseReason } from './lifecycle';
+import { commanderStale, dueCloseReason, helloExpired, planAlarm, type CloseReason } from './lifecycle';
 import { computePresence, type ConnInfo } from './presence';
-import { TokenBucket } from './rateLimit';
+import { TokenBucket, ViolationCounter, bucketKind, peekClientCmdId } from './rateLimit';
 
 interface Attachment {
   connectionId: string;
@@ -41,6 +41,7 @@ interface Attachment {
   partyId: string | null;
   nickname?: string;
   helloDone: boolean;
+  connectedAt: number;
 }
 
 const MAX_VIOLATIONS = 20;
@@ -48,6 +49,7 @@ const CLOSE_PROTOCOL = 4000;
 const CLOSE_REPLACED = 4001;
 const CLOSE_RATE = 4008;
 const CLOSE_ROOM = 4002;
+const CLOSE_STALE = 4009;
 
 const REQUEST_TYPES = new Set([
   'command.issue',
@@ -62,7 +64,9 @@ export class RoomDO extends DurableObject<Env> {
   private room: RoomState | null = null;
   private stt: SttState = 'OFF';
   private buckets = new Map<string, TokenBucket>();
-  private violations = new Map<string, number>();
+  private violations = new Map<string, ViolationCounter>();
+  /** Last real (non-auto-response) message per connection; in-memory, lost on hibernation. */
+  private lastMsgAt = new Map<string, number>();
   private lastPresenceAt = 0;
   private presenceTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -94,6 +98,7 @@ export class RoomDO extends DurableObject<Env> {
       if (request.headers.get('upgrade')?.toLowerCase() !== 'websocket') {
         return new Response('Expected WebSocket upgrade', { status: 426 });
       }
+      if (!this.room || this.room.status !== 'OPEN') return new Response('not found', { status: 404 });
       const pair = new WebSocketPair();
       const server = pair[1];
       this.ctx.acceptWebSocket(server);
@@ -103,8 +108,10 @@ export class RoomDO extends DurableObject<Env> {
         role: 'MEMBER',
         partyId: null,
         helloDone: false,
+        connectedAt: Date.now(),
       };
       server.serializeAttachment(att);
+      await this.rescheduleAlarm(); // hello deadline
       return new Response(null, { status: 101, webSocket: pair[0] });
     }
     return new Response('not found', { status: 404 });
@@ -159,6 +166,12 @@ export class RoomDO extends DurableObject<Env> {
 
   private sendError(ws: WebSocket, code: ErrorCode, message: string = code): void {
     this.send(ws, { v: 1, type: 'error', code, message });
+  }
+
+  /** Error for a request: an `ack` with error when the client sent a clientCmdId, else `error`. */
+  private reject(ws: WebSocket, code: ErrorCode, clientCmdId: string | undefined, message: string = code): void {
+    if (clientCmdId) this.send(ws, { v: 1, type: 'ack', clientCmdId, error: code });
+    else this.sendError(ws, code, message);
   }
 
   private failAndClose(ws: WebSocket, code: ErrorCode, closeCode: number, message: string = code): void {
@@ -222,7 +235,21 @@ export class RoomDO extends DurableObject<Env> {
 
   private async rescheduleAlarm(): Promise<void> {
     if (!this.room) return;
-    await this.ctx.storage.setAlarm(nextAlarmAt(this.room, this.commanderOnline()));
+    let oldest: number | null = null;
+    for (const ws of this.ctx.getWebSockets()) {
+      if (ws.readyState !== 1) continue;
+      const att = ws.deserializeAttachment() as Attachment | null;
+      if (att && !att.helloDone) oldest = Math.min(oldest ?? Infinity, att.connectedAt ?? Date.now());
+    }
+    await this.ctx.storage.setAlarm(
+      planAlarm({
+        expiresAt: this.room.expiresAt,
+        lastCommanderSeenAt: this.room.lastCommanderSeenAt,
+        commanderOnline: this.commanderOnline(),
+        oldestPendingHelloAt: oldest,
+        now: Date.now(),
+      }),
+    );
   }
 
   // ------------------------------------------------------------ WebSocket handlers
@@ -245,25 +272,36 @@ export class RoomDO extends DurableObject<Env> {
     }
 
     const now = Date.now();
-    let bucket = this.buckets.get(att.connectionId);
+    this.lastMsgAt.set(att.connectionId, now);
+    const kind = bucketKind(parsed.ok ? parsed.msg.type : undefined);
+    const bucketKey = `${att.connectionId}:${kind}`;
+    let bucket = this.buckets.get(bucketKey);
     if (!bucket) {
-      const rate =
+      const roleRate =
         att.role === 'COMMANDER'
           ? LIMITS.commanderRatePerSec
           : att.role === 'OPERATOR'
             ? LIMITS.operatorRatePerSec
             : LIMITS.memberRatePerSec;
+      // stt.* has its own budget so a multi-clause utterance cannot starve command requests.
+      const rate = kind === 'stt' && att.role !== 'MEMBER' ? LIMITS.sttRatePerSec : roleRate;
       bucket = new TokenBucket(rate, now);
-      this.buckets.set(att.connectionId, bucket);
+      this.buckets.set(bucketKey, bucket);
     }
+    const cmdId = parsed.ok
+      ? (parsed.msg as { clientCmdId?: string }).clientCmdId
+      : peekClientCmdId(data);
     if (!bucket.take(now)) {
-      const n = (this.violations.get(att.connectionId) ?? 0) + 1;
-      this.violations.set(att.connectionId, n);
-      if (n >= MAX_VIOLATIONS) return this.failAndClose(ws, 'RATE_LIMITED', CLOSE_RATE);
-      return this.sendError(ws, 'RATE_LIMITED');
+      let counter = this.violations.get(att.connectionId);
+      if (!counter) {
+        counter = new ViolationCounter(LIMITS.violationDecayMs);
+        this.violations.set(att.connectionId, counter);
+      }
+      if (counter.hit(now) >= MAX_VIOLATIONS) return this.failAndClose(ws, 'RATE_LIMITED', CLOSE_RATE);
+      return this.reject(ws, 'RATE_LIMITED', cmdId);
     }
 
-    if (!parsed.ok) return this.sendError(ws, 'INVALID_MESSAGE', parsed.error);
+    if (!parsed.ok) return this.reject(ws, 'INVALID_MESSAGE', cmdId, parsed.error);
     const msg = parsed.msg;
     if (!this.room || this.room.status !== 'OPEN') {
       return this.failAndClose(ws, 'ROOM_NOT_FOUND', CLOSE_ROOM);
@@ -314,7 +352,7 @@ export class RoomDO extends DurableObject<Env> {
       msg.type === 'command.issue' || msg.type === 'command.correct' || msg.type === 'command.cancel'
         ? canCommand
         : isCommander;
-    if (!allowed) return this.sendError(ws, 'FORBIDDEN');
+    if (!allowed) return this.reject(ws, 'FORBIDDEN', req.clientCmdId);
     await this.handleRequest(ws, att, req);
   }
 
@@ -373,43 +411,43 @@ export class RoomDO extends DurableObject<Env> {
     att: Attachment,
     hello: Extract<ClientMessage, { type: 'hello' }>,
   ): Promise<void> {
-    const room = this.room;
-    if (!room || room.status !== 'OPEN' || normalizeRoomCode(hello.roomCode) !== room.code) {
+    const pre = this.room;
+    if (!pre || pre.status !== 'OPEN' || normalizeRoomCode(hello.roomCode) !== pre.code) {
       return this.failAndClose(ws, 'ROOM_NOT_FOUND', CLOSE_ROOM);
     }
     if (hello.role === 'COMMANDER' || hello.role === 'OPERATOR') {
       const token = hello.role === 'COMMANDER' ? hello.commanderToken : hello.operatorToken;
-      const expected = hello.role === 'COMMANDER' ? room.commanderTokenHash : room.operatorTokenHash;
+      const expected = hello.role === 'COMMANDER' ? pre.commanderTokenHash : pre.operatorTokenHash;
       if (!token || !timingSafeEqual(await sha256Hex(token), expected)) {
         return this.failAndClose(ws, 'UNAUTHORIZED', CLOSE_PROTOCOL);
       }
     }
+    // State may have changed while hashing (room closed, socket closed, duplicate hello).
+    const room = this.room;
+    if (!room || room.status !== 'OPEN' || ws.readyState !== 1) {
+      return this.failAndClose(ws, 'ROOM_NOT_FOUND', CLOSE_ROOM);
+    }
+    const cur = ws.deserializeAttachment() as Attachment | null;
+    if (!cur || cur.helloDone) return;
 
     const others = this.liveSockets().filter((c) => c.ws !== ws);
-    // Same browser reconnecting before the old socket is reaped: drop the ghost.
-    for (const c of others) {
-      if (c.att.role !== 'COMMANDER' && hello.role !== 'COMMANDER' && c.att.clientId === hello.clientId) {
-        c.ws.serializeAttachment({ ...c.att, helloDone: false });
-        try {
-          c.ws.close(CLOSE_REPLACED, 'replaced');
-        } catch {
-          /* ignore */
-        }
+    const replace = (c: { ws: WebSocket; att: Attachment }) => {
+      this.send(c.ws, { v: 1, type: 'session.replaced' });
+      c.ws.serializeAttachment({ ...c.att, helloDone: false });
+      try {
+        c.ws.close(CLOSE_REPLACED, 'session.replaced');
+      } catch {
+        /* ignore */
       }
-    }
+    };
     if (hello.role === 'COMMANDER') {
-      for (const c of others) {
-        if (c.att.role === 'COMMANDER') {
-          this.send(c.ws, { v: 1, type: 'session.replaced' });
-          c.ws.serializeAttachment({ ...c.att, helloDone: false });
-          try {
-            c.ws.close(CLOSE_REPLACED, 'session.replaced');
-          } catch {
-            /* ignore */
-          }
-        }
-      }
+      for (const c of others) if (c.att.role === 'COMMANDER') replace(c);
     } else {
+      // Same browser reconnecting before the old socket is reaped: only the same clientId AND
+      // role is a duplicate. An operator tab and a member tab from one browser coexist.
+      for (const c of others) {
+        if (c.att.role === hello.role && c.att.clientId === hello.clientId) replace(c);
+      }
       const nonCommander = this.liveSockets().filter(
         (c) => c.ws !== ws && c.att.role !== 'COMMANDER',
       ).length;
@@ -424,6 +462,7 @@ export class RoomDO extends DurableObject<Env> {
       role: hello.role,
       partyId: null,
       helloDone: true,
+      connectedAt: cur.connectedAt ?? Date.now(),
       ...(hello.nickname ? { nickname: hello.nickname } : {}),
     };
     ws.serializeAttachment(next);
@@ -459,25 +498,60 @@ export class RoomDO extends DurableObject<Env> {
   private async onGone(ws: WebSocket): Promise<void> {
     const att = ws.deserializeAttachment() as Attachment | null;
     if (att) {
-      this.buckets.delete(att.connectionId);
+      this.buckets.delete(`${att.connectionId}:cmd`);
+      this.buckets.delete(`${att.connectionId}:stt`);
       this.violations.delete(att.connectionId);
+      this.lastMsgAt.delete(att.connectionId);
     }
     if (!this.room) return;
-    if (att?.role === 'COMMANDER' && att.helloDone && !this.commanderOnline()) {
-      this.room.lastCommanderSeenAt = Date.now();
-      this.stt = 'OFF';
-      await this.persist();
-      await this.ctx.storage.put('stt', this.stt);
-      await this.rescheduleAlarm();
-    }
+    if (att?.role === 'COMMANDER' && att.helloDone) await this.commanderGone();
     this.schedulePresence();
+  }
+
+  /** Commander socket(s) are all gone: record last-seen, STT off, re-plan the alarm. */
+  private async commanderGone(): Promise<void> {
+    if (!this.room || this.commanderOnline()) return;
+    this.room.lastCommanderSeenAt = Date.now();
+    this.stt = 'OFF';
+    await this.persist();
+    await this.ctx.storage.put('stt', this.stt);
+    await this.rescheduleAlarm();
   }
 
   // ------------------------------------------------------------ lifecycle
 
   async alarm(): Promise<void> {
     if (!this.room) return;
-    const reason = dueCloseReason(this.room, this.commanderOnline(), Date.now());
+    const now = Date.now();
+    let commanderDropped = false;
+    for (const ws of this.ctx.getWebSockets()) {
+      if (ws.readyState !== 1) continue;
+      const att = ws.deserializeAttachment() as Attachment | null;
+      if (!att) continue;
+      if (!att.helloDone) {
+        if (helloExpired(att.connectedAt ?? now, now)) {
+          this.failAndClose(ws, 'INVALID_MESSAGE', CLOSE_PROTOCOL, 'hello timeout');
+        }
+      } else if (att.role === 'COMMANDER') {
+        // Pings are auto-answered without waking us, so a half-open socket is invisible unless
+        // we look at the auto-response timestamp. The client pings every 15s.
+        const auto = this.ctx.getWebSocketAutoResponseTimestamp(ws)?.getTime() ?? null;
+        if (commanderStale(auto, this.lastMsgAt.get(att.connectionId) ?? null, att.connectedAt ?? now, now)) {
+          ws.serializeAttachment({ ...att, helloDone: false } satisfies Attachment);
+          try {
+            ws.close(CLOSE_STALE, 'commander stale');
+          } catch {
+            /* ignore */
+          }
+          commanderDropped = true;
+        }
+      }
+    }
+    if (commanderDropped) {
+      await this.commanderGone();
+      this.schedulePresence();
+    }
+    const reason = dueCloseReason(this.room, this.commanderOnline(), now);
     if (reason) await this.closeAll(reason);
     else await this.rescheduleAlarm();
   }

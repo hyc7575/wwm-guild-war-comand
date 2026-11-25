@@ -46,6 +46,7 @@ export function RoomSession({ code, role, token, children }: Props) {
         onStatus: (s, r) => useRoomStore.getState().setConnection(s, r),
         onMessage: (m) => useRoomStore.getState().receive(m),
         onUnsent: (u) => useRoomStore.getState().addUnsent(u),
+        onUnsentResolved: (id) => useRoomStore.getState().dismissUnsent(id),
       },
     });
     if (saved) client.selectParty(saved);

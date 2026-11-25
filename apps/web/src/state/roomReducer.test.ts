@@ -126,6 +126,13 @@ describe('applyServerMessage', () => {
     expect(s.lastAck?.note).toBe('REPEATED');
   });
 
+  it('a late ack removes the matching item from unsent', () => {
+    const item = (id: string) => ({ clientCmdId: id, createdAt: 0, reason: 'NO_ACK' as const, msg: { type: 'command.cancel' as const, commandId: 'c1' } });
+    let s: RoomData = { ...base(), unsent: [item('u1'), item('u2')] };
+    s = apply(s, { v: 1, type: 'ack', clientCmdId: 'u1', commandId: 'c1' });
+    expect(s.unsent.map((u) => u.clientCmdId)).toEqual(['u2']);
+  });
+
   it('does not mutate the input state', () => {
     const before = base();
     const frozen = JSON.stringify(before);

@@ -92,6 +92,7 @@ function setup(opts: { role?: 'MEMBER' | 'COMMANDER'; token?: string } = {}) {
   const statuses: ConnectionStatus[] = [];
   const messages: ServerMessage[] = [];
   const unsent: UnsentCommand[] = [];
+  const resolved: string[] = [];
   let n = 0;
   const client = new RoomClient({
     url: 'ws://x/api/rooms/ABC234/ws',
@@ -107,6 +108,7 @@ function setup(opts: { role?: 'MEMBER' | 'COMMANDER'; token?: string } = {}) {
       onStatus: (s) => statuses.push(s),
       onMessage: (m) => messages.push(m),
       onUnsent: (u) => unsent.push(u),
+      onUnsentResolved: (id) => resolved.push(id),
     },
   });
   const sock = () => FakeWS.instances[FakeWS.instances.length - 1]!;
@@ -114,7 +116,7 @@ function setup(opts: { role?: 'MEMBER' | 'COMMANDER'; token?: string } = {}) {
     sock().open();
     sock().recv(welcome(seq));
   };
-  return { client, e, statuses, messages, unsent, sock, connectOk };
+  return { client, e, statuses, messages, unsent, resolved, sock, connectOk };
 }
 
 beforeEach(() => {
@@ -414,5 +416,80 @@ describe('RoomClient', () => {
     t.sock().recv({ v: 1, type: 'room.closed', reason: 'EXPIRED' });
     t.client.request({ type: 'command.cancel', commandId: 'c' });
     expect(t.unsent[0]!.reason).toBe('CLOSED');
+  });
+
+  it('ignores messages and close events from a socket that is no longer current', () => {
+    const t = setup({ role: 'COMMANDER', token: 't' });
+    t.client.start();
+    t.connectOk();
+    const old = t.sock();
+    old.drop();
+    vi.advanceTimersByTime(500);
+    t.connectOk(); // fresh socket, CONNECTED
+    expect(FakeWS.instances).toHaveLength(2);
+    // stale socket (handlers detached) tries to speak
+    old.onmessage?.({ data: JSON.stringify({ v: 1, type: 'session.replaced' }) });
+    old.onclose?.();
+    old.recv({ v: 1, type: 'room.closed', reason: 'EXPIRED' });
+    expect(t.client.getStatus()).toBe('CONNECTED');
+    expect(t.messages.some((m) => m.type === 'session.replaced' || m.type === 'room.closed')).toBe(false);
+  });
+
+  it('re-sends the last stt.status after every welcome', () => {
+    const t = setup({ role: 'COMMANDER', token: 't' });
+    t.client.start();
+    t.connectOk();
+    t.client.send({ type: 'stt.status', state: 'LISTENING' });
+    expect(t.sock().sentMsgs('stt.status')).toHaveLength(1);
+    t.sock().drop();
+    vi.advanceTimersByTime(500);
+    t.connectOk();
+    expect(t.sock().sentMsgs('stt.status')).toEqual([{ v: 1, type: 'stt.status', state: 'LISTENING' }]);
+    t.client.send({ type: 'stt.status', state: 'OFF' });
+    t.sock().drop();
+    vi.advanceTimersByTime(1000);
+    t.connectOk();
+    expect(t.sock().sentMsgs('stt.status')).toEqual([{ v: 1, type: 'stt.status', state: 'OFF' }]);
+  });
+
+  it('does not send stt.status after welcome if none was ever sent', () => {
+    const t = setup({ role: 'COMMANDER', token: 't' });
+    t.client.start();
+    t.connectOk();
+    expect(t.sock().sentMsgs('stt.status')).toHaveLength(0);
+  });
+
+  it('resend(clientCmdId) reuses the original id and clears the unsent entry', () => {
+    const t = setup({ role: 'COMMANDER', token: 't' });
+    t.client.start();
+    t.connectOk();
+    const id = t.client.request({ type: 'command.cancel', commandId: 'c1' });
+    for (let i = 0; i < 6; i++) {
+      vi.advanceTimersByTime(2000);
+      t.sock().recv('{"v":1,"type":"pong"}');
+    }
+    expect(t.unsent.map((u) => u.clientCmdId)).toEqual([id]);
+    const before = t.sock().sentMsgs('command.cancel').length;
+    expect(t.client.resend(id)).toBe(id);
+    expect(t.resolved).toEqual([id]);
+    const sent = t.sock().sentMsgs('command.cancel');
+    expect(sent.length).toBe(before + 1);
+    expect(sent.at(-1)!.clientCmdId).toBe(id);
+    expect(t.client.resend('nope')).toBeNull();
+  });
+
+  it('a late ack for an already-unsent item emits onUnsentResolved and blocks a stale resend', () => {
+    const t = setup({ role: 'COMMANDER', token: 't' });
+    t.client.start();
+    t.connectOk();
+    const id = t.client.request({ type: 'command.cancel', commandId: 'c1' });
+    for (let i = 0; i < 6; i++) {
+      vi.advanceTimersByTime(2000);
+      t.sock().recv('{"v":1,"type":"pong"}');
+    }
+    expect(t.unsent).toHaveLength(1);
+    t.sock().recv({ v: 1, type: 'ack', clientCmdId: id, commandId: 'c1' });
+    expect(t.resolved).toEqual([id]);
+    expect(t.client.resend(id)).toBeNull(); // already applied: nothing to re-send
   });
 });

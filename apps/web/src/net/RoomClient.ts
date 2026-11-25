@@ -70,6 +70,8 @@ export interface RoomClientHandlers {
   /** Every server message except pong. `event` messages are delivered only when in sequence. */
   onMessage?(msg: ServerMessage): void;
   onUnsent?(item: UnsentCommand): void;
+  /** A late ack arrived (or the item was re-sent / discarded) for a command already reported unsent. */
+  onUnsentResolved?(clientCmdId: string): void;
 }
 
 export interface RoomClientOptions {
@@ -94,6 +96,7 @@ export const BACKOFF_MAX_MS = 8000;
 export const BACKOFF_JITTER = 0.2;
 export const ACK_TIMEOUT_MS = 2000;
 export const MAX_RESENDS = 4;
+const MAX_UNSENT_KEPT = 100;
 const WS_OPEN = 1;
 
 /** Base delay (before jitter) for the n-th retry, n starting at 0. */
@@ -142,6 +145,10 @@ export class RoomClient {
   private attempt = 0;
   private lastRx = 0;
   private partyChoice: PartyId | null = null;
+  /** Last stt.status passed to send(); re-sent after every welcome (server resets STT on commander close). */
+  private lastStt: Extract<SendPayload, { type: 'stt.status' }> | null = null;
+  /** Items reported unsent, kept so resend() can reuse the original clientCmdId. */
+  private unsentItems = new Map<string, UnsentCommand>();
 
   private retryTimer: unknown = null;
   private pingTimer: unknown = null;
@@ -208,6 +215,7 @@ export class RoomClient {
 
   /** Fire-and-forget send. Returns false when not connected (message is dropped). */
   send(msg: SendPayload): boolean {
+    if (msg.type === 'stt.status') this.lastStt = msg;
     if (this.status !== 'CONNECTED' || !this.ws) return false;
     this.rawSend({ v: 1, ...msg } as ClientMessage);
     return true;
@@ -217,8 +225,9 @@ export class RoomClient {
    * Request that expects an `ack`. Assigns clientCmdId, resends after 2s without ack (same id,
    * server dedupes), queues while disconnected. Returns the clientCmdId.
    */
-  request(input: RequestInput): string {
-    const id = this.uuid();
+  request(input: RequestInput, opts: { clientCmdId?: string } = {}): string {
+    const id = opts.clientCmdId ?? this.uuid();
+    if (this.pending.has(id)) return id;
     if (this.status === 'CLOSED' || this.status === 'REPLACED') {
       this.reportUnsent({ clientCmdId: id, msg: input, createdAt: this.now(), reason: 'CLOSED' });
       return id;
@@ -228,6 +237,24 @@ export class RoomClient {
     if (this.status === 'CONNECTED') this.transmit(p);
     else this.scheduleExpiry(p);
     return id;
+  }
+
+  /**
+   * Re-send an item that was reported unsent, keeping its original clientCmdId so the server
+   * dedupes if the first attempt actually landed. Accepts the id or the reported item.
+   * Returns the id, or null when the item is unknown.
+   */
+  resend(item: string | UnsentCommand): string | null {
+    const id = typeof item === 'string' ? item : item.clientCmdId;
+    const known = this.unsentItems.get(id) ?? (typeof item === 'string' ? undefined : item);
+    if (!known) return null;
+    if (this.unsentItems.delete(id)) this.handlers.onUnsentResolved?.(id);
+    return this.request(known.msg, { clientCmdId: id });
+  }
+
+  /** Forget an unsent item the user discarded (a later ack for it is then ignored). */
+  discardUnsent(clientCmdId: string): void {
+    this.unsentItems.delete(clientCmdId);
   }
 
   pendingCount(): number {
@@ -435,6 +462,7 @@ export class RoomClient {
         this.setStatus('CONNECTED');
         this.handlers.onMessage?.(msg);
         if (this.partyChoice !== null) this.send({ type: 'party.select', partyId: this.partyChoice });
+        if (this.lastStt) this.send(this.lastStt);
         this.flushQueue();
         return;
       }
@@ -459,6 +487,7 @@ export class RoomClient {
           this.pending.delete(p.id);
           this.clearPending(p);
         }
+        if (this.unsentItems.delete(msg.clientCmdId)) this.handlers.onUnsentResolved?.(msg.clientCmdId);
         this.handlers.onMessage?.(msg);
         return;
       }
@@ -559,6 +588,10 @@ export class RoomClient {
   }
 
   private reportUnsent(item: UnsentCommand): void {
+    this.unsentItems.set(item.clientCmdId, item);
+    if (this.unsentItems.size > MAX_UNSENT_KEPT) {
+      this.unsentItems.delete(this.unsentItems.keys().next().value as string);
+    }
     this.handlers.onUnsent?.(item);
   }
 }

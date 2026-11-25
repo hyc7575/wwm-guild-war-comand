@@ -3,6 +3,13 @@ export const LIMITS = {
   commanderRatePerSec: 5,
   operatorRatePerSec: 5,
   memberRatePerSec: 2,
+  /** Separate bucket for commander/operator stt.status + stt.feed so utterances do not starve commands. */
+  sttRatePerSec: 5,
+  /** Rate-limit violations are forgotten after this long without a new one. */
+  violationDecayMs: 60_000,
+  helloTimeoutMs: 10_000,
+  commanderLivenessTickMs: 10_000,
+  commanderStaleMs: 25_000,
   roomMaxLifetimeMs: 4 * 3600_000,
   commanderAbsentCloseMs: 30 * 60_000,
   maxCommands: 50,
