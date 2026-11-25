@@ -1,12 +1,17 @@
 import type { SttState } from '@winds/protocol';
 import { classifyError, toServerState, type ErrorKind, type UiSttState } from './status';
+import { applySttConfig } from '../../../config';
 
 type Stt = typeof import('@winds/stt');
 type MicInfo = { deviceId: string; label: string };
 type Supervisor = InstanceType<Stt['SttSupervisor']>;
 
 /** The lib is loaded on demand so the member bundle (and the commander entry) never contain it. */
-export const loadStt = (): Promise<Stt> => import('@winds/stt');
+export const loadStt = async (): Promise<Stt> => {
+  const stt = await import('@winds/stt');
+  applySttConfig(stt);
+  return stt;
+};
 
 export type EngineChoice = 'sherpa-72m' | 'web-speech' | 'fake';
 export const ENGINE_OPTIONS: Array<{ value: EngineChoice; label: string }> = [

@@ -23,6 +23,23 @@ export interface ModelSpec {
   supportsHotwords: boolean;
 }
 
+let modelBaseOverride: string | undefined;
+
+/**
+ * 모델 다운로드 base URL을 바꾼다(R2 등 외부 호스팅). 빈 값·undefined면 각 모델의 고정 리비전 주소로 돌아간다.
+ * 패키지가 import.meta.env를 직접 읽지 않도록 앱(config.ts)이 주입한다. 파일명은 모델 스펙의 것을 그대로 쓴다.
+ */
+export function setModelBase(base: string | undefined | null): void {
+  const t = (base ?? '').trim().replace(/\/+$/, '');
+  modelBaseOverride = t || undefined;
+}
+
+/** 실제로 쓸 base URL(끝 슬래시 없음) */
+export const modelBaseUrl = (m: ModelSpec): string => modelBaseOverride ?? m.baseUrl;
+
+/** 파일 하나의 다운로드 URL */
+export const modelFileUrl = (m: ModelSpec, f: ModelFile): string => `${modelBaseUrl(m)}/${f.name}`;
+
 export const totalBytes = (m: ModelSpec): number => m.files.reduce((n, f) => n + f.size, 0);
 
 /** 주력: kangkyu 72M chunk-16 int8 (docs/planning/research/stt-integration-notes.md 1.1) */

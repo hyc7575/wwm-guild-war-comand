@@ -1,10 +1,12 @@
 import { DEFAULT_DICTIONARY, parse, type ParseResult } from '@winds/parser';
 import { makeDefaultParties } from '@winds/protocol';
+import { applySttConfig } from '../config';
 import {
   FakeEngine,
   MODEL_K2FSA_KO_2024,
   MODEL_KO_72M,
   SherpaOnnxEngine,
+  setModelBase,
   SttSupervisor,
   WebSpeechEngine,
   statusLabel,
@@ -92,6 +94,7 @@ export function summarize(r: ParseResult): string {
 }
 
 function makeEngine(key: EngineKey): SttEngine {
+  applySttConfig({ setModelBase });
   switch (key) {
     case 'fake':
       return new FakeEngine({ exposeGlobal: true });

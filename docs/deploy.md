@@ -10,6 +10,24 @@
 - 자산 한도(공식 문서 확인): 파일 1개 25 MiB, 파일 수 20,000개(Free). sherpa WASM 15.7MB는 통과한다.
 - **음성 인식 모델(약 70MB)은 배포하지 않는다.** 메인오더 브라우저가 Hugging Face에서 받아 IndexedDB에 저장한다. 저장소와 Worker에는 모델이 없다.
 
+## 환경 변수 (웹 빌드 시점, Vite)
+
+| 이름 | 기본값 | 설명 |
+|---|---|---|
+| `VITE_API_BASE` | 빈 값(같은 출처) | API와 WebSocket 주소. 예: `https://api.example.com`. WebSocket은 같은 값에서 `http`를 `ws`로 바꿔 쓴다(`apps/web/src/config.ts`). 끝 슬래시는 제거한다. 단일 Worker 배포에서는 비운다 |
+| `VITE_STT_MODEL_BASE` | 빈 값(Hugging Face 고정 리비전) | 음성 인식 모델 다운로드 base URL. 예: `https://models.example.com/stt` (R2 공개 버킷 등). 끝 슬래시는 무시한다. 파일명은 모델별로 고정이라 이 주소 아래에 같은 이름으로 올려야 한다. 외부 호스팅은 CORS 허용이 필요하다 |
+
+`apps/web/.env.production`에 적거나 빌드 명령 앞에 붙인다. `VITE_` 변수는 번들에 박히므로 비밀 값을 넣지 않는다.
+
+```sh
+VITE_STT_MODEL_BASE=https://models.example.com/stt pnpm --filter @winds/web build
+```
+
+## sherpa wasm과 모델 분리
+
+- sherpa wasm(15.7MB)은 정적 자산 `/vendor/sherpa-onnx/`에 그대로 둔다. Cloudflare 정적 자산 파일 1개 한도(25 MiB) 안이다.
+- 모델(약 70MB)은 그 한도를 넘으므로 정적 자산에 넣지 못한다. R2 또는 외부 호스팅으로 분리하고 `VITE_STT_MODEL_BASE`로 가리킨다.
+
 ## 순서
 
 1. 의존성과 WASM 받기 (WASM은 gitignore 대상이라 새로 받은 저장소에는 없다)

@@ -1,4 +1,4 @@
-import { totalBytes, type ModelFile, type ModelSpec } from './models';
+import { modelFileUrl, totalBytes, type ModelFile, type ModelSpec } from './models';
 
 /** 모델 바이트 저장소. Cache Storage가 기본이고 없으면 OPFS를 쓴다 */
 export interface BlobStore {
@@ -134,7 +134,7 @@ export class ModelStore {
   }
 
   private url(spec: ModelSpec, f: ModelFile) {
-    return `${spec.baseUrl}/${f.name}`;
+    return modelFileUrl(spec, f);
   }
 
   /** 모든 파일이 캐시에 있다(내용 검증은 load에서 한다) */
