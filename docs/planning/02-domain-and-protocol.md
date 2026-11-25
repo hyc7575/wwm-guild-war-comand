@@ -7,7 +7,10 @@
 | 용어 | 뜻 |
 |---|---|
 | 오더방 (Room) | 동맹전 한 판을 위한 임시 공간. 방 코드로 식별한다 |
-| 메인오더 (Commander) | 방을 만든 사람. 명령 발행, 취소, 파티 구성 변경 권한이 있다 |
+| 메인오더 (Commander) | 방을 만든 사람. 명령 발행·정정·취소, 파티 구성 변경, 방 설정·종료 권한이 있다. 방에 한 명 |
+| 서브오더 (Sub-commander) | 메인오더가 링크(`subCommanderToken`)로 권한을 나눠 준 사람. 전체 파티에 명령을 발행·정정·취소할 수 있다. 파티 구성·방 설정·방 종료는 못 한다. 메인·서브 명령이 겹치면 슬롯 규칙(§3.1)대로 최신 명령이 우선한다 |
+| 보조 운영자 (Operator) | 링크(`operatorToken`)로 들어와 인식 원문·후보를 보고 오발행을 취소하거나 수동 명령을 내는 사람. 명령 권한은 서브오더와 같고 방 관리 권한은 없다 |
+| 발행자 (Issuer) | 명령을 낸 연결의 역할. 서버가 연결 정보로 채운다. 역할만 담는다 (§2) |
 | 동맹원 (Member) | 방에 참여해 명령을 보는 사람 |
 | 파티 (Party) | 명령 대상 단위. 방마다 개수와 이름이 다르고 운영 중에 바뀔 수 있다 |
 | 명령 (Command) | 대상 + 행동 + 위치로 구성된 전술 지시 한 건 |
@@ -27,6 +30,8 @@ interface Room {
   createdAt: number;
   expiresAt: number;            // 최대 유지 시간 [제안: 4시간]
   commanderTokenHash: string;   // 메인오더 권한 확인용. 원문 토큰은 메인오더 브라우저에만 있다
+  operatorTokenHash: string;    // 보조 운영자 링크 확인용
+  subCommanderTokenHash?: string; // 서브오더 링크 확인용. 서브오더 도입 전에 만든 방에는 없다(그 방에서는 서브오더 접속 불가)
   settings: RoomSettings;
   parties: Party[];
   partyConfigVersion: number;   // 파티 구성이 바뀔 때마다 1 증가
@@ -74,6 +79,12 @@ interface Command {
   repeatedAt?: number;          // 같은 명령이 다시 말해진 마지막 시각
   correctsId?: CommandId;       // 정정 명령이면 원래 명령 ID
   cancelReason?: 'MISRECOGNIZED' | 'CHANGED' | 'PARTY_REMOVED';
+  issuer?: Issuer;              // 없으면 발행자를 모르는 명령(이 필드가 생기기 전의 방)
+}
+
+// clientId와 닉네임은 넣지 않는다: 스냅샷 크기(명령 50건 x 발행자)와 clientId 노출을 피한다
+interface Issuer {
+  role: 'COMMANDER' | 'SUB_COMMANDER' | 'OPERATOR';
 }
 ```
 
@@ -83,7 +94,7 @@ interface Command {
 interface Member {
   connectionId: string;
   clientId: string;             // 브라우저에 저장한 임의 ID. 재접속 시 같은 사람으로 본다
-  role: 'COMMANDER' | 'MEMBER';
+  role: 'COMMANDER' | 'SUB_COMMANDER' | 'OPERATOR' | 'MEMBER';
   partyId: PartyId | null;
   nickname?: string;            // 선택 입력
 }
@@ -134,15 +145,20 @@ stateDiagram-v2
 
 ## 4. 권한
 
-| 동작 | 메인오더 | 동맹원 |
-|---|---|---|
-| 명령 발행·정정·취소 | O | X |
-| 파티 구성 변경 | O | X |
-| 방 설정 변경, 방 종료 | O | X |
-| 내 파티 선택 | O | O |
-| 명령·이력·접속 현황 보기 | O | O |
+| 동작 | 메인오더 | 서브오더 | 운영자 | 동맹원 |
+|---|---|---|---|---|
+| 명령 발행·정정·취소 | O | O | O | X |
+| 파티 구성 변경 | O | X | X | X |
+| 방 설정 변경, 방 종료 | O | X | X | X |
+| 음성인식 상태 보고(`stt.status`) | O | X | X | X |
+| 인식 원문·후보(`stt.feed`) 보기 | O | O | O | X |
+| 내 파티 선택 | O | O | O | O |
+| 명령·이력·접속 현황 보기 | O | O | O | O |
 
-메인오더 권한은 방을 만들 때 발급한 `commanderToken`으로 확인한다. 토큰은 메인오더 브라우저의 로컬 저장소에만 둔다. 서버는 해시만 보관한다.
+역할은 방을 만들 때 발급한 토큰(`commanderToken`, `operatorToken`, `subCommanderToken`)으로 확인한다. 메인오더 토큰은 메인오더 브라우저의 로컬 저장소에만 둔다. 서버는 해시만 보관한다. 서브오더·운영자 토큰은 메인오더가 링크(`/s/:code#token`, `/o/:code#token`)로 나눠 준다.
+
+- 같은 링크를 여러 명이 써도 막지 않는다. 서버는 어떤 사람이 썼는지 구분하지 못하고, 이미 나눠 준 링크를 회수하는 수단도 없다 (한계). 방은 최대 4시간 뒤 닫힌다.
+- 서브오더·운영자의 접속은 방 수명(메인오더 미접속 30분)과 HUD의 "메인오더 연결 끊김" 표시에 영향을 주지 않는다.
 
 ## 5. 방 생명주기
 

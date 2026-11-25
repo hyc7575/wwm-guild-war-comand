@@ -9,6 +9,7 @@ const CommanderRoom = lazy(() => import('./commander').then((m) => ({ default: m
 const Bench = lazy(() => import('./bench').then((m) => ({ default: m.BenchPage })));
 const Guide = lazy(() => import('./guide').then((m) => ({ default: m.GuidePage })));
 const Operator = lazy(() => import('./operator').then((m) => ({ default: m.Operator })));
+const SubCommander = lazy(() => import('./operator').then((m) => ({ default: m.SubCommander })));
 
 export function AppRoutes() {
   return (
@@ -19,6 +20,7 @@ export function AppRoutes() {
         <Route path="/create" element={<Create />} />
         <Route path="/c/:code" element={<CommanderRoom />} />
         <Route path="/o/:code" element={<Operator />} />
+        <Route path="/s/:code" element={<SubCommander />} />
         <Route path="/guide" element={<Guide />} />
         <Route path="/bench" element={<Bench />} />
         <Route path="*" element={<HomePage />} />

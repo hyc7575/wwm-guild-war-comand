@@ -41,6 +41,8 @@ const code = (c: string) => c.toUpperCase();
 export interface RoomTokens {
   commanderToken?: string;
   operatorToken?: string;
+  /** Absent in tokens saved before the sub-commander role existed. */
+  subCommanderToken?: string;
   expiresAt?: number;
 }
 

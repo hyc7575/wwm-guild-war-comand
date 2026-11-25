@@ -1,5 +1,5 @@
 import type { Command, Party } from '@winds/protocol';
-import { ACTION_LABEL, partyLabel, partyNumbersLabel } from '../../shared/labels';
+import { ACTION_LABEL, ISSUER_LABEL, partyLabel, partyNumbersLabel } from '../../shared/labels';
 import { partyColorStyle } from '../../shared/partyColor';
 import { ActionIcon, actionColor } from './ActionIcon';
 import { LocationBar } from './LocationBar';
@@ -128,6 +128,14 @@ export function CommandCard({
             <LocationBar location={command.location} changed={changed.location} />
           </div>
           <div className={styles.foot}>
+            {command.issuer && (
+              <>
+                <span className={styles.issuer} data-testid={`${idPrefix}-issuer`}>
+                  {ISSUER_LABEL[command.issuer.role]}
+                </span>
+                <span aria-hidden="true"> · </span>
+              </>
+            )}
             <span>{formatElapsed(now - touchedAt(command))}</span>
             <span aria-hidden="true"> · </span>
             <span data-changed={changed.target ? 'true' : undefined}>{targetText(command.target, parties)}</span>

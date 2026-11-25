@@ -16,8 +16,13 @@ export function SummaryView({ summary, temp }: { summary: SessionSummary; temp?:
     ['최대 동시 접속', `${s.peakMembers}명`],
     ['파티별 최대 인원', byParty.length ? byParty.map(([n, v]) => `${n}파티 ${v}명`).join(', ') : '-'],
     ['발행 (음성 / 수동)', `${s.issued.voice} / ${s.issued.manual}`],
+    [
+      '발행자별 (메인오더 / 서브오더 / 운영자)',
+      `${s.issued.byRole?.COMMANDER ?? 0} / ${s.issued.byRole?.SUB_COMMANDER ?? 0} / ${s.issued.byRole?.OPERATOR ?? 0}`,
+    ],
     ['후보 (표시 / 게시)', `${s.candidates.shown} / ${s.candidates.published} (${publishRate(s)})`],
     ['취소 (오인식 / 변경)', `${s.cancelled.misrecognized} / ${s.cancelled.changed}`],
+    ['다른 발행자의 취소 (서브오더 / 운영자)', `${s.cancelled.byOthers?.SUB_COMMANDER ?? 0} / ${s.cancelled.byOthers?.OPERATOR ?? 0}`],
     ['정정', `${s.corrected}`],
     ['말 끝 → 전달 확인 지연 (p50 / p95)', `${fmtLatency(s.latencyMs.p50)} / ${fmtLatency(s.latencyMs.p95)}`],
   ];

@@ -143,6 +143,22 @@ describe('CommandPipeline', () => {
     expect(sent).toHaveLength(2);
   });
 
+  it('a command issued by someone else (sub-commander) is never the target of a voice correction or cancel', () => {
+    const { p, sent, state, ack } = setup();
+    // only someone else's command exists, newer than anything we issued
+    state.commands['S1'] = { id: 'S1', seq: 1, target: { kind: 'ALL' }, action: 'ATTACK', status: 'ACTIVE', source: 'MANUAL', issuedAt: Date.now(), repeatCount: 0, issuer: { role: 'SUB_COMMANDER' } };
+    p.onFinalTranscript('방금 거 취소', { endedAt: Date.now() });
+    p.onFinalTranscript('아니 후퇴', { endedAt: Date.now() });
+    expect(sent.some((s) => s.input.type === 'command.cancel' || s.input.type === 'command.correct')).toBe(false);
+    // once we issue our own, cancel hits our own command, not S1
+    p.onFinalTranscript('3파티 우측 방어', { endedAt: Date.now() });
+    ack(sent[0]!, 'C1', { target: { kind: 'PARTIES', partyIds: ['p3'] }, action: 'DEFEND' });
+    state.commands['S2'] = { ...state.commands['S1']!, id: 'S2', issuedAt: Date.now() + 500 };
+    vi.advanceTimersByTime(1000);
+    p.onFinalTranscript('방금 거 취소', { endedAt: Date.now() });
+    expect(sent[1]!.input).toEqual({ type: 'command.cancel', commandId: 'C1' });
+  });
+
   it('cancel before the first ack is known is not sent (no command id yet)', () => {
     const { p, sent } = setup();
     p.onFinalTranscript('3파티 우측 방어', { endedAt: Date.now() });

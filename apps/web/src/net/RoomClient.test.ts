@@ -87,7 +87,7 @@ function makeEnv() {
   return { env, state, fire };
 }
 
-function setup(opts: { role?: 'MEMBER' | 'COMMANDER'; token?: string } = {}) {
+function setup(opts: { role?: 'MEMBER' | 'COMMANDER' | 'SUB_COMMANDER'; token?: string } = {}) {
   const e = makeEnv();
   const statuses: ConnectionStatus[] = [];
   const messages: ServerMessage[] = [];
@@ -128,6 +128,16 @@ afterEach(() => {
 });
 
 describe('RoomClient', () => {
+  it('maps a SUB_COMMANDER token to subCommanderToken in hello', () => {
+    const t = setup({ role: 'SUB_COMMANDER', token: 'subtok' });
+    t.client.start();
+    t.sock().open();
+    const hello = t.sock().sentMsgs('hello')[0]!;
+    expect(hello).toMatchObject({ role: 'SUB_COMMANDER', subCommanderToken: 'subtok' });
+    expect(hello.operatorToken).toBeUndefined();
+    expect(hello.commanderToken).toBeUndefined();
+  });
+
   it('sends hello with clientId/role/token and becomes CONNECTED on welcome', () => {
     const t = setup({ role: 'COMMANDER', token: 'tok' });
     t.client.start();

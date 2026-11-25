@@ -32,6 +32,8 @@ export interface LastEvent {
   correctedId?: string;
   /** cancelled / parties.updated: cancelled command ids. */
   commandIds?: string[];
+  /** cancelled: role of whoever cancelled (absent on old rooms). */
+  cancelledBy?: Role;
 }
 
 /** Every ack the server sent, in order. `n` is monotonic so consumers can diff without timestamps. */
@@ -245,12 +247,12 @@ function applyEvent(s: RoomData, msg: Extract<ServerMessage, { type: 'event' }>)
       return { ...base, slots, commands, lastEvent: { seq: msg.seq, kind: msg.kind, commandId: command.id, correctedId } };
     }
     case 'command.cancelled': {
-      const { commandIds, reason, slots } = msg.payload;
+      const { commandIds, reason, slots, cancelledBy } = msg.payload;
       return {
         ...base,
         slots,
         commands: markCancelled(s.commands, commandIds, reason),
-        lastEvent: { seq: msg.seq, kind: msg.kind, commandIds },
+        lastEvent: { seq: msg.seq, kind: msg.kind, commandIds, cancelledBy },
       };
     }
     case 'parties.updated': {

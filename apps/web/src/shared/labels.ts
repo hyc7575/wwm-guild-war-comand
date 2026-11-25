@@ -14,6 +14,13 @@ export const ACTION_LABEL: Record<Action, string> = {
   HOLD: '대기',
 };
 
+/** 발행자 라벨 (명령 카드·이력). issuer가 없는 명령(기존 방)은 표시하지 않는다. */
+export const ISSUER_LABEL: Record<'COMMANDER' | 'SUB_COMMANDER' | 'OPERATOR', string> = {
+  COMMANDER: '메인오더',
+  SUB_COMMANDER: '서브오더',
+  OPERATOR: '운영자',
+};
+
 /** Quick location presets (F08). Location ids are free-form; these are just defaults. */
 export const LOCATION_PRESETS: Array<{ id: string; label: string }> = [
   { id: 'left', label: '좌측' },

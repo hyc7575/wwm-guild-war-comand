@@ -53,6 +53,9 @@
   border: 1px solid var(--text-dim);
   border-radius: 999px;
 }
+.tag[data-kind='issuer'] {
+  border-style: dashed;
+}
 .tag[data-kind='corrected'] {
   border-color: var(--warn);
 }

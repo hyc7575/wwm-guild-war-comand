@@ -193,6 +193,24 @@ describe('card badges', () => {
     expect(screen.getByTestId('my-card-repeat')).toHaveTextContent('반복 2회');
   });
 
+  it('shows the issuer label on the card and in history; hidden when issuer is absent', () => {
+    setup();
+    const a = cmd('i1', { target: toParties('p3'), action: 'DEFEND', issuer: { role: 'SUB_COMMANDER' } });
+    welcome([a], { p1: [], p2: [], p3: ['i1'], p4: [] });
+    render(<MemberHud onChangeParty={() => undefined} />);
+    expect(screen.getByTestId('my-card-issuer')).toHaveTextContent('서브오더');
+    fireEvent.click(screen.getByTestId('history-toggle'));
+    expect(screen.getByTestId('history-issuer')).toHaveTextContent('서브오더');
+    cleanup();
+    useRoomStore.getState().reset();
+    setup();
+    welcome([cmd('i2', { target: toParties('p3') })], { p1: [], p2: [], p3: ['i2'], p4: [] });
+    render(<MemberHud onChangeParty={() => undefined} />);
+    expect(screen.queryByTestId('my-card-issuer')).toBeNull();
+    fireEvent.click(screen.getByTestId('history-toggle'));
+    expect(screen.queryByTestId('history-issuer')).toBeNull();
+  });
+
   it('correction: 정정 badge and only changed parts highlighted', () => {
     setup();
     const orig = cmd('o', { target: toParties('p3'), action: 'ATTACK', location: loc('left', '좌측'), status: 'CORRECTED' });

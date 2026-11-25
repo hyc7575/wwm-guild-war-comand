@@ -110,6 +110,10 @@
   color: var(--text-dim);
   font-variant-numeric: tabular-nums;
 }
+.issuer {
+  font-size: 0.85em;
+  font-weight: 700;
+}
 .none {
   margin: 0;
   font-size: 1.6em;

@@ -1,4 +1,4 @@
-import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { MantineProvider } from '@mantine/core';
 import { makeDefaultParties, type Command } from '@winds/protocol';
@@ -20,11 +20,11 @@ const cmd = (id: string, seq: number, partyIds: string[], action: Command['actio
   id, seq, target: { kind: 'PARTIES', partyIds }, action, status: 'ACTIVE', source: 'MANUAL', issuedAt: Date.now() - 5000, repeatCount: 0,
 });
 
-function mount(mode: 'commander' | 'operator' = 'commander', openInvite = false) {
+function mount(mode: 'commander' | 'operator' = 'commander', openInvite = false, extra: { roleLabel?: string; subCommanderToken?: string } = {}) {
   return render(
     <MantineProvider forceColorScheme="dark">
       <ConsoleControllerProvider controller={controller}>
-        <Console mode={mode} code="K7M2QX" operatorToken="optok" openInvite={openInvite} />
+        <Console mode={mode} code="K7M2QX" operatorToken="optok" openInvite={openInvite} {...extra} />
       </ConsoleControllerProvider>
     </MantineProvider>,
   );
@@ -272,6 +272,23 @@ describe('Console (commander)', () => {
     expect((tid('operator-link') as HTMLInputElement).value).toMatch(/\/o\/K7M2QX#optok$/);
   });
 
+  it('invite modal copies the sub-commander link; absent token hides it', async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true });
+    const { unmount } = mount('commander', false, { subCommanderToken: 'subtok' });
+    fireEvent.click(tid('invite-open'));
+    expect((tid('sub-link') as HTMLInputElement).value).toMatch(/\/s\/K7M2QX#subtok$/);
+    expect(screen.getByText(/전체 파티에 명령 가능, 방 설정은 못 함/)).toBeInTheDocument();
+    await act(async () => {
+      fireEvent.click(tid('sub-link-copy'));
+    });
+    expect(writeText).toHaveBeenCalledWith(expect.stringMatching(/\/s\/K7M2QX#subtok$/));
+    unmount();
+    mount();
+    fireEvent.click(tid('invite-open'));
+    expect(screen.queryByTestId('sub-link')).toBeNull();
+  });
+
   it('party editor: rename + apply sends parties.update with baseVersion; VERSION_CONFLICT reloads', () => {
     useRoomStore.setState({ partyConfigVersion: 3 });
     mount();
@@ -299,6 +316,14 @@ describe('Console (commander)', () => {
     expect(tid('party-editor-confirm')).toHaveTextContent('접속 3명');
     fireEvent.click(tid('party-editor-confirm-apply'));
     expect(sent.some((s) => s.input.type === 'parties.update')).toBe(true);
+  });
+});
+
+describe('Console (sub-commander via operator mode)', () => {
+  it('shows the 서브오더 badge', () => {
+    mount('operator', false, { roleLabel: '서브오더' });
+    expect(screen.getByText('서브오더')).toBeInTheDocument();
+    expect(screen.queryByTestId('room-close')).toBeNull();
   });
 });
 

@@ -1,4 +1,4 @@
-import type { Command, Party, Presence } from '@winds/protocol';
+import type { Command, Party, Presence, Role } from '@winds/protocol';
 import type { MetricsSnapshot } from '../metrics';
 import { buildSessionSummary } from './build';
 import type { SummaryStore } from './store';
@@ -11,7 +11,7 @@ export interface CollectorState {
   parties: Party[];
   commands: Record<string, Command>;
   roomStatus: 'OPEN' | 'CLOSED';
-  lastEvent: { seq: number; kind: string; commandIds?: string[] } | null;
+  lastEvent: { seq: number; kind: string; commandId?: string; commandIds?: string[]; cancelledBy?: Role } | null;
 }
 
 export interface CollectorSource {
@@ -40,6 +40,8 @@ export class SessionSummaryCollector {
   private peakMembers = 0;
   private peakByParty: Record<string, number> = {};
   private cancelled = { misrecognized: 0, changed: 0 };
+  private issuedByRole = { COMMANDER: 0, SUB_COMMANDER: 0, OPERATOR: 0 };
+  private cancelledByOthers = { SUB_COMMANDER: 0, OPERATOR: 0 };
   private seenCancels = new Set<string>();
   private lastSeq = -1;
   private sttStats: () => SttStats = () => ({ activeListeningMs: 0, recoveries: 0 });
@@ -94,12 +96,22 @@ export class SessionSummaryCollector {
     const ev = s.lastEvent;
     if (ev && ev.seq !== this.lastSeq) {
       this.lastSeq = ev.seq;
+      if (ev.kind === 'command.issued' && ev.commandId) {
+        // Counted from the event's issuer.role only. A command without issuer (old room) is not counted by role.
+        const role = s.commands[ev.commandId]?.issuer?.role;
+        if (role) this.issuedByRole[role]++;
+      }
       if (ev.kind === 'command.cancelled') {
+        // No cancelledBy = the main commander (old servers). Others are kept out of the KR3 numbers.
+        const by = ev.cancelledBy;
+        const other = by === 'SUB_COMMANDER' || by === 'OPERATOR' ? by : undefined;
         for (const id of ev.commandIds ?? []) {
           if (this.seenCancels.has(id)) continue;
           this.seenCancels.add(id);
           const reason = s.commands[id]?.cancelReason;
-          if (reason === 'MISRECOGNIZED') this.cancelled.misrecognized++;
+          if (other) {
+            if (reason === 'MISRECOGNIZED' || reason === 'CHANGED') this.cancelledByOthers[other]++;
+          } else if (reason === 'MISRECOGNIZED') this.cancelled.misrecognized++;
           else if (reason === 'CHANGED') this.cancelled.changed++;
           // PARTY_REMOVED is a structural edit, not a commander decision: not counted.
         }
@@ -138,6 +150,15 @@ export class SessionSummaryCollector {
       cancelled: {
         misrecognized: this.cancelled.misrecognized + (b?.cancelled.misrecognized ?? 0),
         changed: this.cancelled.changed + (b?.cancelled.changed ?? 0),
+      },
+      issuedByRole: {
+        COMMANDER: this.issuedByRole.COMMANDER + (b?.issued.byRole?.COMMANDER ?? 0),
+        SUB_COMMANDER: this.issuedByRole.SUB_COMMANDER + (b?.issued.byRole?.SUB_COMMANDER ?? 0),
+        OPERATOR: this.issuedByRole.OPERATOR + (b?.issued.byRole?.OPERATOR ?? 0),
+      },
+      cancelledByOthers: {
+        SUB_COMMANDER: this.cancelledByOthers.SUB_COMMANDER + (b?.cancelled.byOthers?.SUB_COMMANDER ?? 0),
+        OPERATOR: this.cancelledByOthers.OPERATOR + (b?.cancelled.byOthers?.OPERATOR ?? 0),
       },
     });
     return { summary, temp: true, savedAt: now, latencies };

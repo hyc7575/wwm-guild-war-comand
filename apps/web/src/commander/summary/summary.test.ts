@@ -68,9 +68,9 @@ describe('percentile / buildSessionSummary', () => {
       sttRecoveries: 2,
       peakMembers: 9,
       peakByParty: { '1': 4 },
-      issued: { voice: 3, manual: 1 },
+      issued: { voice: 3, manual: 1, byRole: { COMMANDER: 0, SUB_COMMANDER: 0, OPERATOR: 0 } },
       candidates: { shown: 5, published: 2 },
-      cancelled: { misrecognized: 1, changed: 2 },
+      cancelled: { misrecognized: 1, changed: 2, byOthers: { SUB_COMMANDER: 0, OPERATOR: 0 } },
       corrected: 1,
       latencyMs: { p50: 200, p95: 400 },
     });
@@ -117,7 +117,48 @@ describe('SessionSummaryCollector', () => {
     const s = col.snapshot().summary;
     expect(s.peakMembers).toBe(8);
     expect(s.peakByParty).toEqual({ '1': 5, '3': 3 });
-    expect(s.cancelled).toEqual({ misrecognized: 1, changed: 2 });
+    expect(s.cancelled).toMatchObject({ misrecognized: 1, changed: 2 });
+    col.dispose();
+  });
+
+  it('counts issued by issuer.role from command.issued events only, and keeps non-commander cancels out of KR3', async () => {
+    const { src, col, metrics } = setup();
+    await col.start();
+    metrics.issuedVoice(); // local request metric: must not touch byRole
+    const withIssuer = (id: string, role: 'COMMANDER' | 'SUB_COMMANDER' | 'OPERATOR'): Command => ({ ...cmd(id, undefined), status: 'ACTIVE', issuer: { role } });
+    const issue = (seq: number, id: string, role: 'COMMANDER' | 'SUB_COMMANDER' | 'OPERATOR') =>
+      src.set({ commands: { ...src.source.getState().commands, [id]: withIssuer(id, role) }, lastEvent: { seq, kind: 'command.issued', commandId: id } });
+    issue(1, 'x1', 'COMMANDER');
+    issue(2, 'x2', 'SUB_COMMANDER');
+    issue(3, 'x3', 'SUB_COMMANDER');
+    issue(4, 'x4', 'OPERATOR');
+    src.set({ commands: { ...src.source.getState().commands, x5: { ...cmd('x5', undefined), issuer: undefined } }, lastEvent: { seq: 5, kind: 'command.issued', commandId: 'x5' } });
+    src.set({ commands: { ...src.source.getState().commands, a: cmd('a', 'MISRECOGNIZED'), b: cmd('b', 'CHANGED'), c: cmd('c', 'CHANGED') }, lastEvent: { seq: 6, kind: 'command.cancelled', commandIds: ['a'], cancelledBy: 'SUB_COMMANDER' } });
+    src.set({ lastEvent: { seq: 7, kind: 'command.cancelled', commandIds: ['b'], cancelledBy: 'COMMANDER' } });
+    src.set({ lastEvent: { seq: 8, kind: 'command.cancelled', commandIds: ['c'] } });
+    const s = col.snapshot().summary;
+    expect(s.issued.voice).toBe(1);
+    expect(s.issued.byRole).toEqual({ COMMANDER: 1, SUB_COMMANDER: 2, OPERATOR: 1 });
+    expect(s.cancelled).toEqual({ misrecognized: 0, changed: 2, byOthers: { SUB_COMMANDER: 1, OPERATOR: 0 } });
+    col.dispose();
+  });
+
+  it('continues from an old temp save without byRole', async () => {
+    const store = new MemorySummaryStore();
+    const old = buildSessionSummary({
+      roomCode: 'K7M2QX', startedAt: 1, endedAt: 2,
+      metrics: { issuedVoice: 1, issuedManual: 0, candidateShown: 0, candidatePublished: 0, corrected: 0, latencies: [] },
+      stt: { activeListeningMs: 0, recoveries: 0 }, peakMembers: 0, peakByParty: {}, cancelled: { misrecognized: 0, changed: 0 },
+    });
+    delete old.issued.byRole;
+    delete old.cancelled.byOthers;
+    await store.saveTemp({ summary: old, temp: true, savedAt: 2 });
+    const { src, col } = setup(store);
+    await col.start();
+    src.set({ commands: { z: { ...cmd('z', undefined), issuer: { role: 'OPERATOR' } } }, lastEvent: { seq: 1, kind: 'command.issued', commandId: 'z' } });
+    const s = col.snapshot().summary;
+    expect(s.issued.byRole).toEqual({ COMMANDER: 0, SUB_COMMANDER: 0, OPERATOR: 1 });
+    expect(s.cancelled.byOthers).toEqual({ SUB_COMMANDER: 0, OPERATOR: 0 });
     col.dispose();
   });
 

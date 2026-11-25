@@ -10,14 +10,17 @@ export function InviteModal({
   onClose,
   code,
   operatorToken,
+  subCommanderToken,
 }: {
   opened: boolean;
   onClose(): void;
   code: string;
   operatorToken?: string;
+  subCommanderToken?: string;
 }) {
   const joinUrl = absolute(`/r/${code}`);
   const operatorUrl = operatorToken ? absolute(`/o/${code}#${operatorToken}`) : null;
+  const subUrl = subCommanderToken ? absolute(`/s/${code}#${subCommanderToken}`) : null;
   const [qr, setQr] = useState<string | null>(null);
   const [copied, setCopied] = useState<string | null>(null);
 
@@ -66,6 +69,17 @@ export function InviteModal({
             <TextInput readOnly value={operatorUrl} aria-label="운영자 링크" data-testid="operator-link" onFocus={(e) => e.currentTarget.select()} />
             <Button variant="default" onClick={() => void copy('op', operatorUrl)} data-testid="operator-link-copy">
               {copied === 'op' ? '복사됨' : '운영자 링크 복사'}
+            </Button>
+          </Stack>
+        )}
+        {subUrl && (
+          <Stack gap="xs" mt="sm">
+            <Alert color="yellow" title="서브오더 링크 주의">
+              서브오더: 전체 파티에 명령 가능, 방 설정은 못 함. 믿을 수 있는 사람에게만 보내세요.
+            </Alert>
+            <TextInput readOnly value={subUrl} aria-label="서브오더 링크" data-testid="sub-link" onFocus={(e) => e.currentTarget.select()} />
+            <Button variant="default" onClick={() => void copy('sub', subUrl)} data-testid="sub-link-copy">
+              {copied === 'sub' ? '복사됨' : '서브오더 링크 복사'}
             </Button>
           </Stack>
         )}

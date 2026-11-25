@@ -25,6 +25,9 @@ interface Props {
   mode: 'commander' | 'operator';
   code: string;
   operatorToken?: string;
+  subCommanderToken?: string;
+  /** Badge text for non-commander modes (default "운영자"; "서브오더" for the sub-commander). */
+  roleLabel?: string;
   /** Commander only: content of the top-bar STT slot. Defaults to the placeholder. */
   sttSlot?: ReactNode;
   /** Commander only: open the invite modal on mount (arrived from /create). */
@@ -32,7 +35,7 @@ interface Props {
 }
 
 /** F08 console. Commander and operator share everything except admin (parties, settings, close, STT). */
-export function Console({ mode, code, operatorToken, sttSlot, openInvite }: Props) {
+export function Console({ mode, code, operatorToken, subCommanderToken, roleLabel, sttSlot, openInvite }: Props) {
   const c = useConsole();
   const parties = useRoomStore((s) => s.parties);
   const connection = useRoomStore((s) => s.connection);
@@ -110,7 +113,7 @@ export function Console({ mode, code, operatorToken, sttSlot, openInvite }: Prop
 
   return (
     <div className={styles.root}>
-      <TopBar mode={mode} code={code} operatorToken={operatorToken} openInvite={openInvite} sttSlot={mode === 'commander' ? (sttSlot ?? <SttSlot />) : undefined} />
+      <TopBar mode={mode} code={code} operatorToken={operatorToken} subCommanderToken={subCommanderToken} roleLabel={roleLabel} openInvite={openInvite} sttSlot={mode === 'commander' ? (sttSlot ?? <SttSlot />) : undefined} />
 
       <div className={styles.cols}>
         <Paper withBorder p="sm">

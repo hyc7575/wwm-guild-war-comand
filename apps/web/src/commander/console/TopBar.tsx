@@ -8,11 +8,13 @@ interface Props {
   mode: 'commander' | 'operator';
   code: string;
   operatorToken?: string;
+  subCommanderToken?: string;
+  roleLabel?: string;
   sttSlot?: ReactNode;
   openInvite?: boolean;
 }
 
-export function TopBar({ mode, code, operatorToken, sttSlot, openInvite }: Props) {
+export function TopBar({ mode, code, operatorToken, subCommanderToken, roleLabel, sttSlot, openInvite }: Props) {
   const c = useConsole();
   const total = useRoomStore((s) => s.presence.total);
   const [invite, setInvite] = useState(!!openInvite);
@@ -22,7 +24,7 @@ export function TopBar({ mode, code, operatorToken, sttSlot, openInvite }: Props
     <Paper withBorder p="xs">
       <Group justify="space-between" wrap="wrap" gap="sm">
         <Group gap="md">
-          {mode === 'commander' ? sttSlot : <Badge color="grape">운영자</Badge>}
+          {mode === 'commander' ? sttSlot : <Badge color="grape">{roleLabel ?? '운영자'}</Badge>}
           <Text>
             방 <Text span fw={700} data-testid="room-code">{code}</Text> · <span data-testid="member-count">{total}명</span>
           </Text>
@@ -40,7 +42,7 @@ export function TopBar({ mode, code, operatorToken, sttSlot, openInvite }: Props
       </Group>
       {mode === 'commander' && (
         <>
-          <InviteModal opened={invite} onClose={() => setInvite(false)} code={code} operatorToken={operatorToken} />
+          <InviteModal opened={invite} onClose={() => setInvite(false)} code={code} operatorToken={operatorToken} subCommanderToken={subCommanderToken} />
           <Modal opened={closing} onClose={() => setClosing(false)} title="방을 종료할까요?" centered transitionProps={{ duration: 0 }}>
             <Stack>
               <Text>종료하면 모든 동맹원의 연결이 끊기고 되돌릴 수 없습니다.</Text>

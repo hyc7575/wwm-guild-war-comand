@@ -294,6 +294,7 @@ export class RoomClient {
         role: this.o.role,
         ...(this.o.role === 'COMMANDER' && this.o.token ? { commanderToken: this.o.token } : {}),
         ...(this.o.role === 'OPERATOR' && this.o.token ? { operatorToken: this.o.token } : {}),
+        ...(this.o.role === 'SUB_COMMANDER' && this.o.token ? { subCommanderToken: this.o.token } : {}),
         ...(this.lastSeq !== undefined ? { lastSeq: this.lastSeq } : {}),
         ...(this.o.nickname ? { nickname: this.o.nickname } : {}),
       });

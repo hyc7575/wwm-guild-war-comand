@@ -1,5 +1,5 @@
 import type { Command, Party } from '@winds/protocol';
-import { ACTION_LABEL, CANCEL_REASON_SHORT } from '../../shared/labels';
+import { ACTION_LABEL, CANCEL_REASON_SHORT, ISSUER_LABEL } from '../../shared/labels';
 import { correctedTo, formatClock, targetText, type HistoryFilter } from './model';
 import styles from './HistoryList.module.css';
 
@@ -47,6 +47,11 @@ export function HistoryList({ parties, rows, commands, filter, onFilter, canFilt
                 <span className={styles.body} data-struck={c.status === 'CANCELLED' ? 'true' : undefined}>
                   {summary(c, parties)}
                 </span>
+                {c.issuer && (
+                  <span className={styles.tag} data-kind="issuer" data-testid="history-issuer">
+                    {ISSUER_LABEL[c.issuer.role]}
+                  </span>
+                )}
                 {showTranscript && c.transcript && (
                   <span className={styles.transcript} data-testid="history-transcript">
                     “{c.transcript}”

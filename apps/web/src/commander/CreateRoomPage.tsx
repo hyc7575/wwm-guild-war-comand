@@ -74,6 +74,7 @@ export default function CreateRoomPage() {
       saveRoomTokens(res.code, {
         commanderToken: res.commanderToken,
         operatorToken: res.operatorToken,
+        subCommanderToken: res.subCommanderToken,
         expiresAt: res.expiresAt,
       });
       await saveLastConfig(finalDrafts);

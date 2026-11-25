@@ -37,12 +37,12 @@ export default function CommanderRoomPage() {
   }
   return (
     <RoomSession code={code} role="COMMANDER" token={tokens.commanderToken}>
-      <CommanderBody code={code} operatorToken={tokens.operatorToken} openInvite={justCreated} />
+      <CommanderBody code={code} operatorToken={tokens.operatorToken} subCommanderToken={tokens.subCommanderToken} openInvite={justCreated} />
     </RoomSession>
   );
 }
 
-function CommanderBody({ code, operatorToken, openInvite }: { code: string; operatorToken?: string; openInvite?: boolean }) {
+function CommanderBody({ code, operatorToken, subCommanderToken, openInvite }: { code: string; operatorToken?: string; subCommanderToken?: string; openInvite?: boolean }) {
   const connection = useRoomStore((s) => s.connection);
   return (
     <>
@@ -54,7 +54,7 @@ function CommanderBody({ code, operatorToken, openInvite }: { code: string; oper
       )}
       <ConsoleProvider>
         <ClosedSummary />
-        <Console mode="commander" code={code} operatorToken={operatorToken} openInvite={openInvite} />
+        <Console mode="commander" code={code} operatorToken={operatorToken} subCommanderToken={subCommanderToken} openInvite={openInvite} />
       </ConsoleProvider>
       <NoticeToast />
     </>
