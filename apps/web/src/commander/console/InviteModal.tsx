@@ -21,6 +21,8 @@ export function InviteModal({
   const joinUrl = absolute(`/r/${code}`);
   const operatorUrl = operatorToken ? absolute(`/o/${code}#${operatorToken}`) : null;
   const subUrl = subCommanderToken ? absolute(`/s/${code}#${subCommanderToken}`) : null;
+  const remoteUrl = subCommanderToken ? absolute(`/r/${code}#${subCommanderToken}`) : null;
+  const [remoteQr, setRemoteQr] = useState<string | null>(null);
   const [qr, setQr] = useState<string | null>(null);
   const [copied, setCopied] = useState<string | null>(null);
 
@@ -34,6 +36,18 @@ export function InviteModal({
       live = false;
     };
   }, [joinUrl, opened]);
+
+  useEffect(() => {
+    if (!opened || !remoteUrl) return;
+    let live = true;
+    // Generated in the browser: the token (URL fragment) never goes to a server or an image service.
+    QRCode.toDataURL(remoteUrl, { margin: 1, width: 192 })
+      .then((u) => live && setRemoteQr(u))
+      .catch(() => live && setRemoteQr(null));
+    return () => {
+      live = false;
+    };
+  }, [remoteUrl, opened]);
 
   const copy = async (label: string, text: string) => {
     try {
@@ -82,6 +96,24 @@ export function InviteModal({
               {copied === 'sub' ? '복사됨' : '서브오더 링크 복사'}
             </Button>
           </Stack>
+        )}
+        {remoteUrl && (
+          <Stack gap="xs" mt="sm" data-testid="remote-section">
+            <Text fw={700}>휴대폰 리모컨</Text>
+            <Alert color="yellow" title="리모컨 링크 주의">
+              서브오더 권한을 휴대폰에 넘기는 링크입니다. 링크·QR을 가진 모든 기기가 같은 권한으로 명령을 내릴 수 있고, 기기별로 막을 수 없습니다. 본인 휴대폰에서만 여세요.
+            </Alert>
+            {remoteQr && <Image src={remoteQr} alt="휴대폰 리모컨 QR" w={192} h={192} data-testid="remote-qr" />}
+            <TextInput readOnly value={remoteUrl} aria-label="휴대폰 리모컨 링크" data-testid="remote-link" onFocus={(e) => e.currentTarget.select()} />
+            <Button variant="default" onClick={() => void copy('remote', remoteUrl)} data-testid="remote-link-copy">
+              {copied === 'remote' ? '복사됨' : '리모컨 링크 복사'}
+            </Button>
+          </Stack>
+        )}
+        {subUrl && (
+          <Text size="xs" c="dimmed">
+            서브오더·리모컨 링크는 같은 토큰을 씁니다. 여러 기기가 동시에 쓸 수 있습니다.
+          </Text>
         )}
       </Stack>
     </Modal>

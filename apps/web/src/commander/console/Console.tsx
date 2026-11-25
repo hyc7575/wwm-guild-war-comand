@@ -17,6 +17,9 @@ import { SttSlot } from './SttSlot';
 import { Subtitles, VoiceTestInput } from './Subtitles';
 import { TextCommand } from './TextCommand';
 import { TopBar } from './TopBar';
+import { PresetBar } from '../presets/PresetBar';
+import { presetShortcutOf } from '../presets/schema';
+import { getPresetStore } from '../presets/store';
 import { EMPTY_PANEL, panelDraft, panelReducer } from './panelState';
 import { isTypingContext, mapShortcut } from './shortcuts';
 import styles from './console.module.css';
@@ -85,6 +88,16 @@ export function Console({ mode, code, operatorToken, subCommanderToken, roleLabe
     const onKey = (e: KeyboardEvent) => {
       if (e.isComposing || isTypingContext(e.target)) return;
       const { parties: ps, locations: locs } = live.current;
+      // Preset keys (F-keys, Shift+digit) are checked first: Shift+1 would otherwise toggle party 1.
+      const ps2 = mode === 'commander' && !live.current.dead ? presetShortcutOf(e) : null;
+      if (ps2) {
+        const preset = getPresetStore().findByShortcut(ps2);
+        if (preset) {
+          e.preventDefault();
+          if (!e.repeat) c.presets.start(preset);
+          return;
+        }
+      }
       const a = mapShortcut(e, { partyCount: ps.length });
       if (!a) return;
       e.preventDefault();
@@ -160,6 +173,8 @@ export function Console({ mode, code, operatorToken, subCommanderToken, roleLabe
         onAction={onAction}
         disabled={dead}
       />
+
+      {mode === 'commander' && <PresetBar disabled={dead} />}
 
       <Group align="flex-start" wrap="nowrap" gap="sm">
         <div style={{ flex: 1 }}>

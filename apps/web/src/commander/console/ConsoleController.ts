@@ -10,6 +10,7 @@ import { CommandPipeline } from '../pipeline/CommandPipeline';
 import { IdbTuningLog, type TuningLog } from '../pipeline/tuningLog';
 import { IssueTracker, type AckInfo } from './IssueTracker';
 import { findLastActive } from './selectors';
+import { PresetRunner } from '../presets/runner';
 
 export interface ConsoleClient {
   request(input: RequestInput): string;
@@ -58,6 +59,8 @@ export class ConsoleController {
   readonly pipeline: CommandPipeline;
   readonly metrics: MetricsSink;
   readonly summary: SessionSummaryCollector | undefined;
+  /** F08 Phase 2: tactical preset queue (each step is an ordinary manual issue). */
+  readonly presets: PresetRunner;
   private readonly getDictionary: () => Dictionary;
   private readonly now: () => number;
   /** commandId -> the cancel request in flight. Entries expire so a lost request cannot skip a command forever. */
@@ -83,6 +86,15 @@ export class ConsoleController {
       tuningLog: o.tuningLog ?? new IdbTuningLog(),
       now: this.now,
     });
+    this.presets = new PresetRunner({
+      getParties: () => this.parties,
+      issue: (d, onAck) => this.issueManual(d, 'MANUAL', onAck),
+      cancel: (id) => this.cancelCommand(id),
+      isCancellable: (id) => {
+        const c = this.o.store.getState().commands[id];
+        return !!c && c.status !== 'CANCELLED' && c.status !== 'CORRECTED';
+      },
+    });
     this.lastAckN = o.store.getState().ackCounter;
     this.unsub = o.store.subscribe((s) => {
       this.pumpAcks(s.ackLog, s.ackCounter);
@@ -92,6 +104,7 @@ export class ConsoleController {
 
   dispose(): void {
     this.unsub();
+    this.presets.dispose();
     this.pipeline.dispose();
   }
 
@@ -123,7 +136,7 @@ export class ConsoleController {
 
   // ---------- manual issue / cancel ----------
 
-  issueManual(d: ManualDraft, source: 'MANUAL' = 'MANUAL'): string {
+  issueManual(d: ManualDraft, source: 'MANUAL' = 'MANUAL', onAck?: (ack: AckInfo) => void): string {
     const fields = {
       target: d.target,
       action: d.action,
@@ -136,6 +149,7 @@ export class ConsoleController {
         ? { type: 'command.correct', correctsId: d.correctsId, ...fields }
         : { type: 'command.issue', ...fields },
       describeDraft(d, this.parties),
+      onAck,
     );
     this.metrics.issuedManual();
     return id;
