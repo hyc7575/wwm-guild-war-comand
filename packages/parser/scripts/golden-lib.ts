@@ -1,7 +1,7 @@
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { Action, makeDefaultParties, type Command, type Party } from '@winds/protocol';
-import { DEFAULT_DICTIONARY, parse, type ParseResult, type Dictionary } from '../src/index';
+import { DEFAULT_DICTIONARY, parse, type ContextCommand, type ParseResult, type Dictionary } from '../src/index';
 
 // ---------------------------------------------------------------------------
 // 골든 케이스 형식 (packages/parser/README.md 참고)
@@ -10,7 +10,16 @@ export type Conf = 'HIGH' | 'MEDIUM';
 export type TargetSpec = 'ALL' | number[];
 
 export type ExpectResult =
-  | { kind: 'ISSUE'; confidence: Conf; target: TargetSpec; action: Action; location?: string; support?: number[] }
+  | {
+      kind: 'ISSUE';
+      confidence: Conf;
+      target: TargetSpec;
+      action: Action;
+      location?: string;
+      support?: number[];
+      /** 문맥을 근거로 쓴 결과의 근거 명령 (case.context 의 1부터 센 번호, 즉 c1, c2) */
+      context?: string[];
+    }
   | {
       kind: 'CORRECT';
       confidence: Conf;
@@ -29,6 +38,8 @@ export interface GoldenCase {
   /** 직전 음성 명령. ageMs 기본 3000 */
   last?: { target: TargetSpec; action: Action; location?: string; ageMs?: number };
   options?: { targetlessAsAll?: boolean };
+  /** 직전 발행 명령들(문맥). id는 c1, c2 … 순서대로 붙는다. ageMs 기본 5000 */
+  context?: { target: TargetSpec; action: Action; location?: string; ageMs?: number }[];
   expect: ExpectResult[];
   knownFailure?: boolean;
   reason?: string;
@@ -117,7 +128,22 @@ export function runCase(c: GoldenCase, dictionary: Dictionary = DEFAULT_DICTIONA
     };
     lastVoiceCommand = { command, issuedAt: command.issuedAt };
   }
-  return parse(c.text, { parties, dictionary, lastVoiceCommand, now: NOW, options: c.options });
+  const context: ContextCommand[] | undefined = c.context?.map((x, i) => ({
+    id: `c${i + 1}`,
+    target: x.target === 'ALL' ? { kind: 'ALL' } : { kind: 'PARTIES', partyIds: x.target.map(idOf) },
+    action: x.action,
+    location: x.location
+      ? { id: x.location, label: dictionary.locations.find((l) => l.id === x.location)?.label ?? x.location }
+      : undefined,
+    issuedAt: NOW - (x.ageMs ?? 5000),
+  }));
+  return parse(c.text, {
+    parties,
+    dictionary,
+    lastVoiceCommand,
+    now: NOW,
+    options: { ...c.options, ...(context ? { context } : {}) },
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -138,7 +164,7 @@ function canonExpect(e: ExpectResult): Canon {
     return {
       kind: 'ISSUE',
       confidence: e.confidence,
-      slots: `T=${tgt(e.target)} A=${e.action} L=${e.location ?? '-'} S=${sup(e.support)}`,
+      slots: `T=${tgt(e.target)} A=${e.action} L=${e.location ?? '-'} S=${sup(e.support)}${e.context ? ` C=${e.context.join(',')}` : ''}`,
     };
   if (e.kind === 'CORRECT')
     return {
@@ -158,7 +184,7 @@ function canonActual(r: ParseResult, parties: Party[]): Canon {
     return {
       kind: 'ISSUE',
       confidence: r.confidence,
-      slots: `T=${t(r.draft.target)} A=${r.draft.action} L=${r.draft.location?.id ?? '-'} S=${s(r.draft.supportPartyIds)}`,
+      slots: `T=${t(r.draft.target)} A=${r.draft.action} L=${r.draft.location?.id ?? '-'} S=${s(r.draft.supportPartyIds)}${r.context ? ` C=${r.context.commandIds.join(',')}` : ''}`,
     };
   if (r.kind === 'CORRECT')
     return {

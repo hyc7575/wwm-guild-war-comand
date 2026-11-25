@@ -1,8 +1,9 @@
 import { LIMITS, type Command, type Party, type RoomSettings, type SttFeedOutcome } from '@winds/protocol';
-import { parse, type CommandDraft, type Dictionary, type ParseResult } from '@winds/parser';
+import { CONTEXT_MAX, CONTEXT_WINDOW_MS, parse, type CommandDraft, type ContextCommand, type Dictionary, type ParseResult } from '@winds/parser';
 import type { RequestInput, SendPayload } from '../../net/RoomClient';
 import type { AckInfo } from '../console/IssueTracker';
 import { describeDraft, describePatch } from '../labels';
+import { ACTION_LABEL } from '../../shared/labels';
 import type { MetricsSink } from '../metrics';
 import type { TuningLog } from './tuningLog';
 
@@ -40,6 +41,10 @@ export interface Candidate {
   draft?: CommandDraft;
   correctsId?: string;
   patch?: Partial<CommandDraft>;
+  /** Set when the parser filled slots from a recent command: "아까 명령(1파티 중앙) 기준". */
+  contextLabel?: string;
+  /** Ids of the commands the parser used as context. */
+  contextCommandIds?: string[];
 }
 
 /** What the button panel is filled with when a candidate is edited. correctsId is set for CORRECT candidates. */
@@ -139,12 +144,12 @@ export class CommandPipeline {
       dictionary: this.deps.getDictionary(),
       lastVoiceCommand: this.resolveLastVoice(state),
       now,
-      options: { targetlessAsAll: state.settings.targetlessAsAll },
+      options: { targetlessAsAll: state.settings.targetlessAsAll, context: this.recentContext(state, now) },
     });
 
     const line: SubtitleLine = { id: this.uuid(), text, at: now, chips: [] };
     // Candidates are added after the line so a re-render never shows a candidate without its line.
-    for (const r of results) this.handleResult(r, line, text, opts.endedAt, state.parties);
+    for (const r of results) this.handleResult(r, line, text, opts.endedAt, state.parties, state.commands);
     this.set({ partial: '', subtitles: [...this.snap.subtitles, line].slice(-SUBTITLE_MAX) });
   }
 
@@ -201,7 +206,14 @@ export class CommandPipeline {
 
   // ---------- result handling ----------
 
-  private handleResult(r: ParseResult, line: SubtitleLine, text: string, endedAt: number, parties: Party[]): void {
+  private handleResult(
+    r: ParseResult,
+    line: SubtitleLine,
+    text: string,
+    endedAt: number,
+    parties: Party[],
+    commands: Record<string, Command>,
+  ): void {
     const m = this.deps.metrics;
     switch (r.kind) {
       case 'ISSUE': {
@@ -211,7 +223,14 @@ export class CommandPipeline {
           line.chips.push({ kind: 'ISSUED', label, clientCmdId: id });
           this.queueFeed(text, 'ISSUED', label);
         } else {
-          const c = this.addCandidate({ kind: 'ISSUE', text, label, confidence: CONFIDENCE_VALUE.MEDIUM, draft: r.draft });
+          const c = this.addCandidate({
+            kind: 'ISSUE',
+            text,
+            label,
+            confidence: CONFIDENCE_VALUE.MEDIUM,
+            draft: r.draft,
+            ...this.contextFields(r, commands, parties),
+          });
           line.chips.push({ kind: 'CANDIDATE', label, candidateId: c.id });
           this.queueFeed(text, 'CANDIDATE', `후보 · ${label}`);
         }
@@ -315,6 +334,35 @@ export class CommandPipeline {
     }
     if (this.lastVoice?.clientCmdId === clientCmdId && ack.commandId) this.lastVoice.commandId = ack.commandId;
     if (endedAt !== undefined) this.deps.metrics.latency(ack.at - endedAt);
+  }
+
+  /** Live commands issued within the context window, newest first (voice or manual). The parser picks the latest few. */
+  private recentContext(state: PipelineState, now: number): ContextCommand[] {
+    return Object.values(state.commands)
+      .filter((c) => c.status === 'ACTIVE' && now - c.issuedAt <= CONTEXT_WINDOW_MS)
+      .sort((a, b) => b.issuedAt - a.issuedAt)
+      .slice(0, CONTEXT_MAX)
+      .map((c) => ({ id: c.id, target: c.target, action: c.action, location: c.location, issuedAt: c.issuedAt }));
+  }
+
+  /** "아까 명령(1파티 중앙) 기준" for results whose slots came from recent commands. */
+  private contextFields(
+    r: ParseResult,
+    commands: Record<string, Command>,
+    parties: Party[],
+  ): Pick<Candidate, 'contextLabel' | 'contextCommandIds'> {
+    if (r.kind !== 'ISSUE' || !r.context) return {};
+    const basis = r.context.commandIds
+      .map((id) => commands[id])
+      .filter((c): c is Command => !!c)
+      .map((c) => {
+        const t = describeDraft({ target: c.target, action: c.action }, parties).split(' ')[0];
+        return [t, c.location?.label ?? ACTION_LABEL[c.action]].join(' ');
+      });
+    return {
+      contextLabel: basis.length ? `아까 명령(${basis.join(', ')}) 기준` : '아까 명령 기준',
+      contextCommandIds: r.context.commandIds,
+    };
   }
 
   /** Last VOICE command this pipeline issued, once acked and still live. */

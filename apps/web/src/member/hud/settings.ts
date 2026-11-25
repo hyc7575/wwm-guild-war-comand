@@ -11,6 +11,8 @@ export interface HudSettings {
   fontStep: 0 | 1 | 2;
   /** force reduced motion even if the OS does not ask for it */
   reduceMotion: boolean;
+  /** F06: parties with a command first, idle ones shrunk when 8+ parties (default: party-number order) */
+  activeFirst: boolean;
 }
 
 export const DEFAULT_HUD_SETTINGS: HudSettings = {
@@ -20,6 +22,7 @@ export const DEFAULT_HUD_SETTINGS: HudSettings = {
   wakeLockOn: true,
   fontStep: 0,
   reduceMotion: false,
+  activeFirst: false,
 };
 
 export const FONT_SCALE = [1, 1.15, 1.3] as const;
@@ -38,6 +41,7 @@ function load(): HudSettings {
       wakeLockOn: typeof o.wakeLockOn === 'boolean' ? o.wakeLockOn : d.wakeLockOn,
       fontStep: o.fontStep === 1 || o.fontStep === 2 ? o.fontStep : 0,
       reduceMotion: typeof o.reduceMotion === 'boolean' ? o.reduceMotion : d.reduceMotion,
+      activeFirst: typeof o.activeFirst === 'boolean' ? o.activeFirst : d.activeFirst,
     };
   } catch {
     return DEFAULT_HUD_SETTINGS;

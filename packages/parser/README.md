@@ -58,6 +58,7 @@ const results = parse('1파티 2파티 중앙으로 모여', {
 | `parties?` | `[{number,name?,aliases?}]` 직접 지정 (id는 `p{번호}`) |
 | `last?` | 직전 음성 명령 `{target,action,location?,ageMs?}` (ageMs 기본 3000) |
 | `options?` | `{targetlessAsAll?}` |
+| `context?` | 직전 발행 명령 배열(`target`, `action`, `location?`, `ageMs?`). id는 c1, c2 …. 기대값의 `context: ["c1"]`은 근거 명령 |
 | `knownFailure?`, `reason?` | 지금은 못 맞히는 케이스. 통과하면 vitest가 알려 준다 |
 | `note?` | 메모 |
 

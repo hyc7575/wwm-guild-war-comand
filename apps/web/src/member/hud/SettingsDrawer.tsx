@@ -80,6 +80,10 @@ export function SettingsDrawer({ settings, onChange, onClose }: SettingsDrawerPr
           <input type="checkbox" checked={settings.reduceMotion} onChange={(e) => onChange({ reduceMotion: e.target.checked })} />
           동작 줄이기
         </label>
+        <label className={styles.row}>
+          <input type="checkbox" checked={settings.activeFirst} onChange={(e) => onChange({ activeFirst: e.target.checked })} data-testid="opt-active-first" />
+          명령 있는 파티 먼저 (8개 이상이면 빈 파티 축소)
+        </label>
 
         <fieldset className={styles.fonts}>
           <legend>글자 크기</legend>

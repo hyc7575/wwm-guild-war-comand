@@ -1,0 +1,39 @@
+// 문맥("아까 거기로", "다시", "똑같이"): 문맥으로 채운 결과는 항상 MEDIUM, 근거 명령 ID(C=)를 담는다
+{"text": "아까 거기로 모여", "context": [{"target": [1], "action": "MOVE", "location": "CENTER"}], "expect": [{"kind": "ISSUE", "confidence": "MEDIUM", "target": "ALL", "action": "GATHER", "location": "CENTER", "context": ["c1"]}]}
+{"text": "거기로 모여", "context": [{"target": [1], "action": "MOVE", "location": "CENTER"}], "options": {"targetlessAsAll": true}, "note": "targetlessAsAll이어도 문맥 결과는 후보", "expect": [{"kind": "ISSUE", "confidence": "MEDIUM", "target": "ALL", "action": "GATHER", "location": "CENTER", "context": ["c1"]}]}
+{"text": "2파티 거기로 이동", "context": [{"target": [1], "action": "GATHER", "location": "RIGHT"}], "expect": [{"kind": "ISSUE", "confidence": "MEDIUM", "target": [2], "action": "MOVE", "location": "RIGHT", "context": ["c1"]}]}
+{"text": "다시", "context": [{"target": [1], "action": "MOVE", "location": "CENTER"}], "expect": [{"kind": "ISSUE", "confidence": "MEDIUM", "target": [1], "action": "MOVE", "location": "CENTER", "context": ["c1"]}]}
+{"text": "똑같이 해", "context": [{"target": [3, 4], "action": "DEFEND", "location": "LEFT"}], "expect": [{"kind": "ISSUE", "confidence": "MEDIUM", "target": [3, 4], "action": "DEFEND", "location": "LEFT", "context": ["c1"]}]}
+{"text": "한 번 더", "context": [{"target": "ALL", "action": "GATHER", "location": "CENTER"}], "expect": [{"kind": "ISSUE", "confidence": "MEDIUM", "target": "ALL", "action": "GATHER", "location": "CENTER", "context": ["c1"]}]}
+{"text": "2파티도 똑같이", "context": [{"target": [1], "action": "ATTACK", "location": "RIGHT"}], "note": "대상만 바꾸고 행동·위치는 직전 명령", "expect": [{"kind": "ISSUE", "confidence": "MEDIUM", "target": [2], "action": "ATTACK", "location": "RIGHT", "context": ["c1"]}]}
+{"text": "다시 모여", "context": [{"target": [1], "action": "ATTACK", "location": "RIGHT"}], "note": "행동이 다르면 위치만 가져오고 대상은 가져오지 않는다", "expect": [{"kind": "ISSUE", "confidence": "MEDIUM", "target": "ALL", "action": "GATHER", "location": "RIGHT", "context": ["c1"]}]}
+{"text": "다시 모여", "context": [{"target": [2], "action": "GATHER", "location": "CENTER"}], "note": "같은 행동이면 대상도 가져온다", "expect": [{"kind": "ISSUE", "confidence": "MEDIUM", "target": [2], "action": "GATHER", "location": "CENTER", "context": ["c1"]}]}
+{"text": "거기로 모여", "context": [{"target": [1], "action": "MOVE", "location": "CENTER", "ageMs": 90000}], "note": "60초 넘은 문맥은 쓰지 않는다", "expect": [{"kind": "ISSUE", "confidence": "MEDIUM", "target": "ALL", "action": "GATHER"}]}
+{"text": "거기로 모여", "context": [{"target": [1], "action": "MOVE", "location": "LEFT", "ageMs": 40000}, {"target": [2], "action": "MOVE", "location": "RIGHT", "ageMs": 5000}], "note": "가장 최근 명령 우선", "expect": [{"kind": "ISSUE", "confidence": "MEDIUM", "target": "ALL", "action": "GATHER", "location": "RIGHT", "context": ["c2"]}]}
+{"text": "거기로 모여", "context": [{"target": [1], "action": "MOVE", "location": "LEFT", "ageMs": 40000}, {"target": [2], "action": "HOLD", "ageMs": 5000}], "note": "최근 명령에 위치가 없으면 그 앞 명령에서", "expect": [{"kind": "ISSUE", "confidence": "MEDIUM", "target": "ALL", "action": "GATHER", "location": "LEFT", "context": ["c1"]}]}
+{"text": "거기로 모여", "context": [{"target": [1], "action": "MOVE", "location": "LEFT", "ageMs": 40000}, {"target": [2], "action": "HOLD", "ageMs": 10000}, {"target": [3], "action": "HOLD", "ageMs": 3000}], "note": "최근 2건만 본다", "expect": [{"kind": "ISSUE", "confidence": "MEDIUM", "target": "ALL", "action": "GATHER"}]}
+{"text": "거기로 모여", "options": {"targetlessAsAll": true}, "note": "문맥이 없으면 위치가 빠진 채라 자동 발행하지 않는다", "expect": [{"kind": "ISSUE", "confidence": "MEDIUM", "target": "ALL", "action": "GATHER"}]}
+{"text": "1파티 거기로 모여", "options": {"targetlessAsAll": true}, "note": "문맥이 없으면 후보", "expect": [{"kind": "ISSUE", "confidence": "MEDIUM", "target": [1], "action": "GATHER"}]}
+{"text": "다시", "note": "문맥도 없고 표현도 없다", "expect": [{"kind": "NONE"}]}
+{"text": "똑같이", "context": [{"target": [1], "action": "MOVE", "location": "CENTER", "ageMs": 120000}], "expect": [{"kind": "NONE"}]}
+{"text": "1파티 다시 중앙으로 모여", "context": [{"target": [1], "action": "MOVE", "location": "CENTER"}], "note": "빠진 슬롯이 없으면 문맥을 쓰지 않는다", "expect": [{"kind": "ISSUE", "confidence": "HIGH", "target": [1], "action": "GATHER", "location": "CENTER"}]}
+{"text": "1파티 중앙으로 모여", "context": [{"target": [2], "action": "ATTACK", "location": "RIGHT"}], "note": "문맥 표현이 없으면 문맥을 쓰지 않는다", "expect": [{"kind": "ISSUE", "confidence": "HIGH", "target": [1], "action": "GATHER", "location": "CENTER"}]}
+// 복합 명령
+{"text": "1파티 중앙 모여 2파티 우측 막아", "expect": [{"kind": "ISSUE", "confidence": "HIGH", "target": [1], "action": "GATHER", "location": "CENTER"}, {"kind": "ISSUE", "confidence": "HIGH", "target": [2], "action": "DEFEND", "location": "RIGHT"}]}
+{"text": "1파티 중앙으로 모이고 2파티는 후방", "note": "행동 생략: 앞 절의 행동을 이어 쓰되 후보", "expect": [{"kind": "ISSUE", "confidence": "HIGH", "target": [1], "action": "GATHER", "location": "CENTER"}, {"kind": "ISSUE", "confidence": "MEDIUM", "target": [2], "action": "GATHER", "location": "BACK"}]}
+{"text": "1파티 중앙으로 모여 그리고 2파티 후방", "expect": [{"kind": "ISSUE", "confidence": "HIGH", "target": [1], "action": "GATHER", "location": "CENTER"}, {"kind": "ISSUE", "confidence": "MEDIUM", "target": [2], "action": "GATHER", "location": "BACK"}]}
+{"text": "2파티 우측 막고 1파티 중앙으로 모여", "expect": [{"kind": "ISSUE", "confidence": "HIGH", "target": [2], "action": "DEFEND", "location": "RIGHT"}, {"kind": "ISSUE", "confidence": "HIGH", "target": [1], "action": "GATHER", "location": "CENTER"}]}
+{"text": "1파티는 앞에서 치고 2파티는 뒤에서 막고", "expect": [{"kind": "ISSUE", "confidence": "HIGH", "target": [1], "action": "ATTACK", "location": "FRONT"}, {"kind": "ISSUE", "confidence": "HIGH", "target": [2], "action": "DEFEND", "location": "BACK"}]}
+{"text": "1파티 중앙 2파티 후방", "note": "행동이 어디에도 없으면 버린다", "expect": [{"kind": "NONE"}]}
+// 제외 표현
+{"text": "다 모여 1파티 빼고", "expect": [{"kind": "ISSUE", "confidence": "MEDIUM", "target": [2, 3, 4, 5, 6], "action": "GATHER"}]}
+{"text": "1파티 2파티 빼고 모여", "expect": [{"kind": "ISSUE", "confidence": "MEDIUM", "target": [3, 4, 5, 6], "action": "GATHER"}]}
+{"text": "1파티 빼고 다 중앙으로 모여", "expect": [{"kind": "ISSUE", "confidence": "MEDIUM", "target": [2, 3, 4, 5, 6], "action": "GATHER", "location": "CENTER"}]}
+{"text": "2파티 제외하고 전원 지켜", "partyCount": 3, "expect": [{"kind": "ISSUE", "confidence": "MEDIUM", "target": [1, 3], "action": "DEFEND"}]}
+{"text": "1파티 빼고 3파티 모여", "note": "남은 말에 대상이 있으면 그대로", "expect": [{"kind": "ISSUE", "confidence": "MEDIUM", "target": [3], "action": "GATHER"}]}
+{"text": "1파티 2파티 빼고 모여", "partyCount": 2, "note": "남는 파티가 없다", "expect": [{"kind": "NONE"}]}
+{"text": "9파티 빼고 다 모여", "note": "방에 없는 파티", "expect": [{"kind": "NONE"}]}
+// 붙여 쓴 숫자 말·상대 서술
+{"text": "삼사파티 모여", "expect": [{"kind": "ISSUE", "confidence": "MEDIUM", "target": [3, 4], "action": "GATHER"}]}
+{"text": "적 공격 들어오네요", "expect": [{"kind": "NONE"}]}
+{"text": "상대 쳐", "note": "서술 어미가 없으면 명령 후보", "expect": [{"kind": "ISSUE", "confidence": "MEDIUM", "target": "ALL", "action": "ATTACK"}]}

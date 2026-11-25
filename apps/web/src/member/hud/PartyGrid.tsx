@@ -12,14 +12,22 @@ export interface PartyGridProps {
   now: number;
   /** equal-size big cells (no party chosen yet, FR-F06-6) */
   large?: boolean;
+  /** column count (see gridLayout.gridColumns); omit for the CSS auto-fill fallback */
+  columns?: number;
+  /** shrink parties without a command to one short row (8+ parties, "active first" option) */
+  compactIdle?: boolean;
   dimmed?: boolean;
   onSelect?(party: Party): void;
 }
 
 /** FR-F06-5: compact cells, party-number order. Presentational. */
-export function PartyGrid({ parties, commandOf, now, large, dimmed, onSelect }: PartyGridProps) {
+export function PartyGrid({ parties, commandOf, now, large, columns, compactIdle, dimmed, onSelect }: PartyGridProps) {
   return (
-    <ul className={styles.grid} data-large={large ? 'true' : undefined} data-dimmed={dimmed ? 'true' : undefined} aria-label="파티별 명령">
+    <ul
+      className={styles.grid}
+      style={columns ? { gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))` } : undefined}
+      data-columns={columns}
+      data-large={large ? 'true' : undefined} data-dimmed={dimmed ? 'true' : undefined} aria-label="파티별 명령">
       {parties.map((p) => {
         const c = commandOf(p.id);
         const support = c?.action === 'SUPPORT' && c.supportPartyIds?.length ? `→${partyNumbersLabel(parties, c.supportPartyIds)}` : '';
@@ -31,11 +39,15 @@ export function PartyGrid({ parties, commandOf, now, large, dimmed, onSelect }: 
               style={partyColorStyle(p)}
               data-testid={`party-cell-${p.number}`}
               data-stale={c && isStale(c, now) ? 'true' : undefined}
+              data-compact={!c && compactIdle ? 'true' : undefined}
               onClick={() => onSelect?.(p)}
             >
               <span className={styles.head}>
                 <span className={styles.num}>{p.number}</span>
-                <span className={styles.name}>{p.name ?? `${p.number}파티`}</span>
+                <span className={styles.name} title={p.name ?? undefined}>
+                  {p.name ?? `${p.number}파티`}
+                </span>
+                {!c && compactIdle && <span className={styles.idle}>—</span>}
               </span>
               {c ? (
                 <span className={styles.cmd}>
@@ -46,7 +58,7 @@ export function PartyGrid({ parties, commandOf, now, large, dimmed, onSelect }: 
                   </span>
                   {c.location && <span className={styles.loc}>{c.location.label}</span>}
                 </span>
-              ) : (
+              ) : compactIdle ? null : (
                 <span className={styles.empty}>—</span>
               )}
             </button>

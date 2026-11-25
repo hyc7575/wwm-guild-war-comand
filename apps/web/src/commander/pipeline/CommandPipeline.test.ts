@@ -70,6 +70,34 @@ describe('CommandPipeline', () => {
     expect(sub[0]!.chips[0]).toMatchObject({ kind: 'ISSUED', label: '3파티 방어 우측', clientCmdId: 'req1' });
   });
 
+  it('context phrases take slots from a recent command: always a candidate, labelled with its basis', () => {
+    const { p, sent, state } = setup({ targetlessAsAll: true });
+    state.commands.C1 = {
+      id: 'C1', seq: 1, target: { kind: 'PARTIES', partyIds: ['p1'] }, action: 'MOVE', location: { id: 'CENTER', label: '중앙' },
+      status: 'ACTIVE', source: 'MANUAL', issuedAt: Date.now() - 5000, repeatCount: 0,
+    } as Command;
+    p.onFinalTranscript('아까 거기로 모여', { endedAt: Date.now() });
+    expect(sent).toHaveLength(0);
+    const [c] = p.getSnapshot().candidates;
+    expect(c).toMatchObject({
+      kind: 'ISSUE',
+      label: '전체 집결 중앙',
+      contextLabel: '아까 명령(1파티 중앙) 기준',
+      contextCommandIds: ['C1'],
+    });
+  });
+
+  it('ignores context from commands older than 60s or no longer ACTIVE', () => {
+    const { p, state } = setup();
+    const base = { seq: 1, target: { kind: 'ALL' }, action: 'MOVE', location: { id: 'LEFT', label: '좌측' }, repeatCount: 0, source: 'MANUAL' } as const;
+    state.commands.OLD = { ...base, id: 'OLD', status: 'ACTIVE', issuedAt: Date.now() - 61_000 } as Command;
+    state.commands.GONE = { ...base, id: 'GONE', status: 'CANCELLED', issuedAt: Date.now() - 1000 } as Command;
+    p.onFinalTranscript('거기로 모여', { endedAt: Date.now() });
+    const [c] = p.getSnapshot().candidates;
+    expect(c?.contextLabel).toBeUndefined();
+    expect(c?.draft?.location).toBeUndefined();
+  });
+
   it('records latency from endedAt to the ack', () => {
     const { p, sent, metrics, ack } = setup();
     p.onFinalTranscript('3파티 우측 방어', { endedAt: Date.now() });

@@ -43,4 +43,4 @@
 {"text": "3파티 수고하셨어요", "expect": [{"kind": "NONE"}]}
 {"text": "전원 수고했습니다", "expect": [{"kind": "NONE"}]}
 {"text": "", "expect": [{"kind": "NONE"}]}
-{"text": "상대 공격 들어오네요", "knownFailure": true, "reason": "행동 단어가 든 일반 발화는 대상 없는 후보(MEDIUM)로 남는다. 후보는 메인오더 화면에서 걸러지므로 자동 발행(HIGH)은 아니다", "expect": [{"kind": "NONE"}]}
+{"text": "상대 공격 들어오네요", "note": "상대 주어 + 서술 어미, 대상 없음", "expect": [{"kind": "NONE"}]}

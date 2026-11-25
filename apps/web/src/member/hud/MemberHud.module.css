@@ -1,4 +1,11 @@
 .hud {
+  /* notch / rounded corners: keep content inside the safe area (viewport-fit=cover) */
+  --safe-l: env(safe-area-inset-left, 0px);
+  --safe-r: env(safe-area-inset-right, 0px);
+  --safe-b: env(safe-area-inset-bottom, 0px);
+  min-width: 0;
+  max-width: 100vw;
+  overflow-x: clip;
   display: flex;
   flex-direction: column;
   min-height: 100dvh;
@@ -8,9 +15,17 @@
   position: sticky;
   top: 0;
   z-index: 10;
+  padding-top: env(safe-area-inset-top, 0px);
+  background: var(--surface);
+}
+/* short landscape phones: a sticky bar + banner would eat the screen, so let it scroll away */
+@media (max-height: 500px) {
+  .top {
+    position: static;
+  }
 }
 .band {
-  padding: 8px 16px;
+  padding: 8px max(16px, var(--safe-r)) 8px max(16px, var(--safe-l));
   font-weight: 700;
   color: #1a1400;
 }
@@ -31,13 +46,14 @@
   cursor: pointer;
 }
 .loading {
-  padding: 16px;
+  padding: 16px max(16px, var(--safe-r)) 16px max(16px, var(--safe-l));
 }
 .body {
+  box-sizing: border-box;
   display: flex;
   flex-direction: column;
   gap: 12px;
-  padding: 12px;
+  padding: 12px max(12px, var(--safe-r)) calc(12px + var(--safe-b)) max(12px, var(--safe-l));
   max-width: 720px;
   width: 100%;
   margin: 0 auto;
@@ -110,7 +126,7 @@
       'all  history';
     align-items: start;
     gap: 16px;
-    padding: 16px;
+    padding: 16px max(16px, var(--safe-r)) calc(16px + var(--safe-b)) max(16px, var(--safe-l));
   }
   .hint {
     grid-area: hint;
@@ -118,7 +134,7 @@
   .mine {
     grid-area: mine;
     position: sticky;
-    top: 70px;
+    top: calc(70px + env(safe-area-inset-top, 0px));
   }
   .all {
     grid-area: all;

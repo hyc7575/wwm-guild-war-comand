@@ -19,6 +19,11 @@ export function CandidatesBar({ onEdit }: { onEdit(draft: EditedDraft): void }) 
                 <Text fw={700}>
                   후보: {c.label}
                 </Text>
+                {c.contextLabel && (
+                  <Text size="xs" c="yellow.7" data-testid="candidate-context">
+                    {c.contextLabel}
+                  </Text>
+                )}
                 <Text size="xs" c="dimmed">
                   &ldquo;{c.text}&rdquo; · {left}초
                 </Text>

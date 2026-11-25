@@ -14,7 +14,7 @@ import {
   WEAK_ACTION_EXPRESSIONS,
   type Dictionary,
 } from './dictionary';
-import { normalize } from './normalize';
+import { hasAdjacentNumberRun, normalize } from './normalize';
 
 // ---------------------------------------------------------------------------
 // 공개 타입 (F03)
@@ -41,9 +41,32 @@ export interface Match {
   value: string;
 }
 
+/** 문맥으로 쓰는 직전 발행 명령 (F03 문맥 처리). */
+export interface ContextCommand {
+  id: CommandId;
+  target: Target;
+  action: Action;
+  location?: Location;
+  issuedAt: number;
+}
+
+/** 문맥 창: 이 시간(ms) 안에 발행된 명령만 쓴다. 가장 최근 2건까지. */
+export const CONTEXT_WINDOW_MS = 60_000;
+export const CONTEXT_MAX = 2;
+
 export interface ParseOptions {
   /** Q1: 대상 없는 명령을 전체 대상 확신도 높음으로 본다 (방 설정 `targetlessAsAll`) */
   targetlessAsAll?: boolean;
+  /** "아까 거기로", "다시", "똑같이"가 가리킬 직전 발행 명령들. 이걸로 채운 결과는 항상 MEDIUM이다 */
+  context?: ContextCommand[];
+}
+
+/** 문맥에서 값을 가져온 ISSUE 결과의 근거 */
+export interface ContextUse {
+  /** 근거로 쓴 명령 ID (가까운 것부터) */
+  commandIds: CommandId[];
+  /** 문맥에서 채운 슬롯 */
+  filled: ('target' | 'action' | 'location')[];
 }
 
 export interface ParseContext {
@@ -57,7 +80,7 @@ export interface ParseContext {
 export type Confidence = 'HIGH' | 'MEDIUM';
 
 export type ParseResult =
-  | { kind: 'ISSUE'; draft: CommandDraft; confidence: Confidence; evidence: Match[] }
+  | { kind: 'ISSUE'; draft: CommandDraft; confidence: Confidence; evidence: Match[]; context?: ContextUse }
   | {
       kind: 'CORRECT';
       correctsId: CommandId;
@@ -376,6 +399,14 @@ function splitClauses(ms: Mention[]): Clause[] {
     if (acts.length) next = acts;
     else if (next) c.borrowed = next;
   }
+  // 행동 생략: "1파티 중앙으로 모이고 2파티는 후방"처럼 뒤 절에 행동이 없으면 앞 절의 행동을 이어 쓴다 (위치가 있을 때만)
+  for (let i = 1; i < out.length; i++) {
+    const c = out[i] as Clause;
+    if (c.borrowed.length || c.ms.some((m) => m.kind === 'action') || !c.ms.some((m) => m.kind === 'location')) continue;
+    const prev = out[i - 1] as Clause;
+    const acts = prev.ms.filter((m) => m.kind === 'action');
+    if (acts.length) c.borrowed = acts;
+  }
   return out;
 }
 
@@ -632,42 +663,179 @@ export function parse(text: string, ctx: ParseContext): ParseResult[] {
   )
     capMedium = true;
 
-  // "1파티 빼고", "제외": 제외 표현이 있으면 대상 해석을 믿을 수 없다
-  if (/빼고|제외|빼면|말구/.test(t.replace(/ /g, ''))) capMedium = true;
-  const res = issue(body, ctx);
+  // 일이파티처럼 숫자 말을 붙여 쓴 것은 1·2파티로 읽지만 추측이다
+  if (hasAdjacentNumberRun(text, d)) capMedium = true;
+
+  // 상대 상황을 말하는 혼잣말 ("상대 공격 들어오네요")은 명령이 아니다
+  if (body.some((m) => m.kind === 'action') && !body.some(isTarget) && isEnemyNarration(t)) return [{ kind: 'NONE', reason: '상대 상황 서술' }];
+
+  // "1파티 빼고", "제외": 파티 목록을 알면 나머지 파티를 대상으로 하되 후보로만 둔다. 제외 표현은 자동 발행하지 않는다.
+  let exclude: PartyId[] | undefined;
+  const ex = findExclusion(t);
+  if (ex) {
+    capMedium = true;
+    const r = applyExclusion(body, ex, ctx.parties);
+    body = r.body;
+    exclude = r.exclude;
+  }
+
+  const compactText = t.replace(/ /g, '');
+  const res = issue(body, ctx, {
+    exclude,
+    anaphora: LOCATION_ANAPHORA.test(compactText),
+    repeat: REPEAT_WORDS.test(compactText),
+    context: pickContext(ctx),
+  });
   if (!capMedium) return res;
   return res.map((r) => (r.kind === 'ISSUE' ? { ...r, confidence: 'MEDIUM' as const } : r));
 }
 
-function issue(ms: Mention[], ctx: ParseContext): ParseResult[] {
-  if (ms.length === 0) return [{ kind: 'NONE', reason: '명령 표현 없음' }];
+/** 문맥에서 빠진 슬롯을 채운다. 채운 게 있으면 근거를 돌려준다 */
+function fillFromContext(b: Built, x: IssueExtras): ContextUse | undefined {
+  const filled: ContextUse['filled'] = [];
+  const ids: CommandId[] = [];
+  const use = (c: ContextCommand) => {
+    if (!ids.includes(c.id)) ids.push(c.id);
+  };
+  const recent = x.context[0];
+  if (!recent) return undefined;
+  if (!b.location && (x.anaphora || x.repeat)) {
+    const withLoc = x.context.find((c) => c.location);
+    if (withLoc?.location) {
+      b.location = withLoc.location;
+      filled.push('location');
+      use(withLoc);
+    }
+  }
+  if (x.repeat) {
+    if (!b.action) {
+      b.action = recent.action;
+      b.weak = false;
+      filled.push('action');
+      use(recent);
+    }
+    // 같은 행동을 다시 하라는 뜻일 때만 대상도 가져온다 (다른 행동이면 누구에게인지 알 수 없다)
+    if (!b.target && b.action === recent.action) {
+      b.target = recent.target;
+      filled.push('target');
+      use(recent);
+    }
+  }
+  if (!filled.length) return undefined;
+  return { commandIds: ids, filled };
+}
+
+interface IssueExtras {
+  /** 제외 표현으로 빠진 파티. 대상이 전체이거나 없으면 나머지 파티로 바꾼다 */
+  exclude?: PartyId[];
+  /** 문맥 표현 사용 여부 */
+  anaphora: boolean;
+  repeat: boolean;
+  context: ContextCommand[];
+}
+
+// ---------------------------------------------------------------------------
+// 제외 표현·문맥 표현·상대 서술
+
+const LOCATION_ANAPHORA = /거기|그쪽|그곳|그자리|그위치/;
+const REPEAT_WORDS = /다시|똑같이|똑같은|한번더|한번만더|또한번/;
+
+function pickContext(ctx: ParseContext): ContextCommand[] {
+  return (ctx.options?.context ?? [])
+    .filter((c) => ctx.now - c.issuedAt <= CONTEXT_WINDOW_MS)
+    .sort((a, b) => b.issuedAt - a.issuedAt)
+    .slice(0, CONTEXT_MAX);
+}
+
+const ENEMY_SUBJECT = /(?:^|\s)(?:상대방?|상대편|적군?|저쪽)(?:이|가|은|는|들)?(?=\s|$)/;
+const NARRATIVE_END = /(?:네요?|는데요?|던데요?|왔다|왔어요?|온다|오는데요?|오고있)$/;
+
+function isEnemyNarration(t: string): boolean {
+  return ENEMY_SUBJECT.test(t) && NARRATIVE_END.test(t.replace(/ /g, ''));
+}
+
+function findExclusion(t: string): { start: number; end: number } | undefined {
+  const m = /빼고|제외|빼면|말구/.exec(t);
+  return m ? { start: m.index, end: m.index + m[0].length } : undefined;
+}
+
+/**
+ * 제외 표현 앞(또는 "다 모여 1파티 빼고"처럼 뒤)에 붙은 파티 나열을 빼낸다.
+ * 남은 말에 대상 파티가 없으면 `exclude`를 돌려주고, issue()가 전체에서 그 파티를 뺀 나머지를 대상으로 한다.
+ * 파티 목록이 없거나 방에 없는 파티가 섞이면 손대지 않는다(후보 유지).
+ */
+function applyExclusion(
+  body: Mention[],
+  ex: { start: number; end: number },
+  parties: readonly Party[],
+): { body: Mention[]; exclude?: PartyId[] } {
+  if (!parties.length) return { body };
+  const ms = body.filter((m) => !(m.start < ex.end && ex.start < m.end));
+  const before = ms.filter((m) => m.end <= ex.start);
+  const after = ms.filter((m) => m.start >= ex.end);
+  let i = before.length;
+  while (i > 0 && before[i - 1]?.kind === 'party') i--;
+  const run = before.slice(i);
+  if (!run.length) return { body };
+  const rest = [...before.slice(0, i), ...after];
+  // "1파티 빼고 2파티 3파티 모여"처럼 남은 말에 대상이 있으면 그대로 쓴다
+  if (rest.some((m) => m.kind === 'party' || m.kind === 'unknown')) return { body: rest };
+  return { body: rest, exclude: uniq(run.map((m) => m.value)) };
+}
+
+function issue(ms: Mention[], ctx: ParseContext, x: IssueExtras): ParseResult[] {
+  const useContext = x.anaphora || x.repeat;
+  if (ms.length === 0 && !(useContext && x.context.length)) return [{ kind: 'NONE', reason: '명령 표현 없음' }];
   const asAll = ctx.options?.targetlessAsAll === true;
   const results: ParseResult[] = [];
   let unknownParty: string | undefined;
   let weakOnly = false;
+  const clauses = splitClauses(ms);
+  if (!clauses.length) clauses.push({ ms: [], borrowed: [], reordered: false });
 
-  for (const cl of splitClauses(ms)) {
+  for (const cl of clauses) {
     const b = buildClause(cl);
     if (b.unknown) {
       unknownParty ??= b.unknown;
       continue;
     }
+    const used = useContext ? fillFromContext(b, x) : undefined;
     if (!b.action) continue;
+    if (x.exclude && (!b.target || b.target.kind === 'ALL')) {
+      const rest = ctx.parties.map((p) => p.id).filter((id) => !x.exclude?.includes(id));
+      if (!rest.length) continue;
+      b.target = { kind: 'PARTIES', partyIds: rest };
+    }
     if (b.weak && !b.target && !b.location) {
       weakOnly = true;
       continue;
     }
     const targetless = !b.target;
     const supportMissing = b.action === 'SUPPORT' && !b.supportPartyIds && !b.location;
+    // 문맥 표현("거기", "다시")이 있는데 채울 문맥이 없어 빠진 채 남았으면 자동 발행하지 않는다
+    const unresolved = useContext && ((x.anaphora && !b.location) || (x.repeat && !b.target));
     const high =
-      !b.weak && !b.conflict && !b.filled && !b.reordered && !b.mixed && !supportMissing && (!targetless || asAll);
+      !used &&
+      !unresolved &&
+      !b.weak &&
+      !b.conflict &&
+      !b.filled &&
+      !b.reordered &&
+      !b.mixed &&
+      !supportMissing &&
+      (!targetless || asAll);
     const draft: CommandDraft = { target: b.target ?? { kind: 'ALL' }, action: b.action };
     if (b.location) draft.location = b.location;
     if (b.supportPartyIds) draft.supportPartyIds = b.supportPartyIds;
     const evidence = b.evidence;
-    results.push({ kind: 'ISSUE', draft, confidence: high ? 'HIGH' : 'MEDIUM', evidence });
+    results.push({
+      kind: 'ISSUE',
+      draft,
+      confidence: high ? 'HIGH' : 'MEDIUM',
+      evidence,
+      ...(used ? { context: used } : {}),
+    });
   }
-
   if (results.length) return results;
   if (unknownParty) return [{ kind: 'NONE', reason: `방에 없는 파티: ${unknownParty}` }];
   if (weakOnly) return [{ kind: 'NONE', reason: '모호한 행동 표현뿐 (대상·위치 없음)' }];

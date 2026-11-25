@@ -10,7 +10,7 @@ import { DEFAULT_DICTIONARY, type Dictionary } from './dictionary';
  *    - 여러 개: `1,2파티` `1·2파티` `1 2 파티` `1/2파티` `1과 2파티` `1하고 2파티` `1이랑 2파티` `1 그리고 2파티` → `1파티 2파티`
  *    - 숫자 범위: `1~3파티` `1-3파티` `1에서 3파티` `1부터 3파티` → `1파티 2파티 3파티` (숫자만, 최대 12)
  *    - "이 파티"처럼 지시어 `이` + 공백 + 파티는 숫자로 보지 않는다. 붙여 쓴 `이파티`는 2파티.
- *    - 지원하지 않음: 한자어 숫자를 붙여 쓴 `일이파티`(= 1,2 인지 알 수 없다), 숫자 말 사이 공백 없는 나열, `1파티~3파티` 형태 범위
+ *    - 붙여 쓴 한 글자 숫자 말은 값이 오름차순일 때만 나열로 읽는다(`일이파티` = 1,2, `삼사오파티` = 3,4,5. 추측이라 파서가 후보로 낮춘다). 지원하지 않음: 오름차순이 아닌 나열, `1파티~3파티` 형태 범위
  *    - 한글 바로 뒤에 붙은 숫자 말(`서일파티`)은 단어의 일부일 수 있어 건드리지 않는다. 아라비아 숫자는 앞 글자와 상관없이 변환한다.
  * 3. 구두점은 공백으로 바꾸고 공백을 한 칸으로 줄인다.
  *
@@ -23,6 +23,8 @@ interface Compiled {
   rangeRe: RegExp;
   sepRe: RegExp;
   numberWords: Record<string, number>;
+  /** 붙여 쓴 숫자 말 나열: 일이파티 */
+  runRe: RegExp;
 }
 
 const cache = new WeakMap<object, Compiled>();
@@ -45,6 +47,7 @@ function compile(dict: NormalizeDictionary): Compiled {
     rangeRe: new RegExp(`(?<!\\d)(\\d{1,2})\\s*(?:~|-|–|에서|부터)\\s*(\\d{1,2})\\s*(?:번\\s*)?(?:${suf})`, 'gu'),
     sepRe: new RegExp(sep, 'u'),
     numberWords: dict.numberWords,
+    runRe: new RegExp(`(?<![가-힣\\d])([가-힣]{2,3})(?=\\s*(?:번\\s*)?(?:${suf}))`, 'gu'),
   };
   cache.set(dict, compiled);
   return compiled;
@@ -57,9 +60,38 @@ function joinParties(nums: number[], before: string | undefined): string {
   return before !== undefined && before !== ' ' ? ` ${body}` : body;
 }
 
+/**
+ * 붙여 쓴 한 글자 숫자 말 나열("일이", "삼사오")을 숫자 목록으로 읽는다. 한 글자씩 끊어 1 이상이고
+ * 값이 순서대로 커질 때만 인정한다(일이=1,2). "십이"처럼 사전에 통째로 있는 말은 그 값이다.
+ */
+function splitNumberRun(word: string, numberWords: Record<string, number>): number[] | undefined {
+  if (numberWords[word] !== undefined) return undefined;
+  const nums: number[] = [];
+  for (const ch of word) {
+    const v = numberWords[ch];
+    if (v === undefined || v < 1 || (nums.length && v <= (nums[nums.length - 1] as number))) return undefined;
+    nums.push(v);
+  }
+  return nums.length >= 2 ? nums : undefined;
+}
+
+/** 위 규칙으로 읽은 붙여 쓴 숫자 나열이 들어 있는가 (추측이라 파서가 확신도를 낮춘다) */
+export function hasAdjacentNumberRun(text: string, dict: NormalizeDictionary = DEFAULT_DICTIONARY): boolean {
+  const c = compile(dict);
+  for (const m of text.normalize('NFKC').toLowerCase().matchAll(c.runRe)) {
+    if (splitNumberRun(m[1] as string, c.numberWords)) return true;
+  }
+  return false;
+}
+
 export function normalize(text: string, dict: NormalizeDictionary = DEFAULT_DICTIONARY): string {
   const c = compile(dict);
   let s = text.normalize('NFKC').toLowerCase();
+
+  s = s.replace(c.runRe, (m, word: string) => {
+    const nums = splitNumberRun(word, c.numberWords);
+    return nums ? nums.join(' ') : m;
+  });
 
   // 범위: 1~3파티
   s = s.replace(c.rangeRe, (m, a: string, b: string, offset: number, whole: string) => {

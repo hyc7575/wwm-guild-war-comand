@@ -10,6 +10,7 @@ import { HudStatusBar } from './HudStatusBar';
 import { PartyGrid } from './PartyGrid';
 import { SettingsDrawer } from './SettingsDrawer';
 import { isAudioBlocked, onAudioStateChange, unlockAudio } from './beeper';
+import { gridColumns, orderParties, shouldCompactIdle } from './gridLayout';
 import { supportersOf } from './model';
 import { FONT_SCALE, useHudSettings } from './settings';
 import { useCardEffects } from './useCardEffects';
@@ -47,6 +48,7 @@ export function MemberHud({ onChangeParty }: { onChangeParty(): void }) {
   const { settings, update } = useHudSettings();
   const now = useNow(1000);
   const wide = useMediaQuery('(min-width: 900px)');
+  const tablet = useMediaQuery('(min-width: 600px)');
   const osReduced = useMediaQuery('(prefers-reduced-motion: reduce)');
   const fx = useCardEffects(m, settings);
   const audioBlocked = useAudioBlocked(settings.soundOn);
@@ -73,6 +75,11 @@ export function MemberHud({ onChangeParty }: { onChangeParty(): void }) {
   const reduced = settings.reduceMotion || osReduced;
   const shownCommand = fx.struckCommand ?? m.myCommand;
   const unselected = !m.myParty;
+  // FR-F06-6: someone without a party always sees equal, party-number-ordered cells
+  const activeFirst = settings.activeFirst && !unselected;
+  const gridList = orderParties(m.gridParties, m.commandOf, activeFirst);
+  const columns = gridColumns(gridList.length, wide ? 'wide' : tablet ? 'tablet' : 'phone');
+  const compactIdle = shouldCompactIdle(m.parties.length, activeFirst);
   const focusParty = focus ? m.parties.find((p) => p.id === focus.id) : undefined;
 
   return (
@@ -186,7 +193,9 @@ export function MemberHud({ onChangeParty }: { onChangeParty(): void }) {
           )}
           <div className={styles.grid}>
             <PartyGrid
-              parties={m.gridParties}
+              parties={gridList}
+              columns={columns}
+              compactIdle={compactIdle}
               commandOf={m.commandOf}
               now={now}
               large={unselected}
