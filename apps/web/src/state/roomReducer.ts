@@ -22,6 +22,28 @@ export interface Notice {
   text: string;
 }
 
+/** Last applied room event (additive; lets the HUD animate transitions without diffing). */
+export interface LastEvent {
+  seq: number;
+  kind: Extract<ServerMessage, { type: 'event' }>['kind'];
+  /** issued/corrected: the new command; repeated: the repeated command. */
+  commandId?: string;
+  /** corrected: the replaced command. */
+  correctedId?: string;
+  /** cancelled / parties.updated: cancelled command ids. */
+  commandIds?: string[];
+}
+
+/** Every ack the server sent, in order. `n` is monotonic so consumers can diff without timestamps. */
+export interface AckRecord {
+  n: number;
+  clientCmdId: string;
+  commandId?: string;
+  error?: string;
+  note?: string;
+}
+export const ACK_LOG_MAX = 50;
+
 export interface RoomData {
   roomCode: string | null;
   role: Role | null;
@@ -50,6 +72,10 @@ export interface RoomData {
   lastAck: { clientCmdId: string; commandId?: string; error?: string; note?: string } | null;
   notice: Notice | null;
   noticeCounter: number;
+  lastEvent: LastEvent | null;
+  /** Capped log of all acks (console ack UI / pipeline latency). */
+  ackLog: AckRecord[];
+  ackCounter: number;
 }
 
 export const EMPTY_PRESENCE: Presence = {
@@ -86,6 +112,9 @@ export function initialRoomData(): RoomData {
     lastAck: null,
     notice: null,
     noticeCounter: 0,
+    lastEvent: null,
+    ackLog: [],
+    ackCounter: 0,
   };
 }
 
@@ -165,10 +194,20 @@ export function applyServerMessage(s: RoomData, msg: ServerMessage): RoomData {
       };
     case 'error':
       return { ...s, lastError: { code: msg.code, message: msg.message } };
-    case 'ack':
+    case 'ack': {
+      const n = s.ackCounter + 1;
+      const rec: AckRecord = {
+        n,
+        clientCmdId: msg.clientCmdId,
+        ...(msg.commandId !== undefined ? { commandId: msg.commandId } : {}),
+        ...(msg.error !== undefined ? { error: msg.error } : {}),
+        ...(msg.note !== undefined ? { note: msg.note } : {}),
+      };
+      const next = { ...s, ackCounter: n, ackLog: [...s.ackLog, rec].slice(-ACK_LOG_MAX) };
       return msg.error || msg.note
-        ? { ...s, lastAck: { clientCmdId: msg.clientCmdId, commandId: msg.commandId, error: msg.error, note: msg.note } }
-        : s;
+        ? { ...next, lastAck: { clientCmdId: msg.clientCmdId, commandId: msg.commandId, error: msg.error, note: msg.note } }
+        : next;
+    }
     case 'session.replaced':
     case 'pong':
       return s;
@@ -182,29 +221,39 @@ function applyEvent(s: RoomData, msg: Extract<ServerMessage, { type: 'event' }>)
   switch (msg.kind) {
     case 'command.issued': {
       const { command, slots } = msg.payload;
-      return { ...base, slots, commands: { ...s.commands, [command.id]: command } };
+      return { ...base, slots, commands: { ...s.commands, [command.id]: command }, lastEvent: { seq: msg.seq, kind: msg.kind, commandId: command.id } };
     }
     case 'command.repeated': {
       const { commandId, repeatedAt, repeatCount } = msg.payload;
       const c = s.commands[commandId];
       if (!c) return base;
-      return { ...base, commands: { ...s.commands, [commandId]: { ...c, repeatedAt, repeatCount } } };
+      return {
+        ...base,
+        commands: { ...s.commands, [commandId]: { ...c, repeatedAt, repeatCount } },
+        lastEvent: { seq: msg.seq, kind: msg.kind, commandId },
+      };
     }
     case 'command.corrected': {
       const { command, correctedId, slots } = msg.payload;
       const old = s.commands[correctedId];
       const commands = { ...s.commands, [command.id]: command };
       if (old) commands[correctedId] = { ...old, status: 'CORRECTED' };
-      return { ...base, slots, commands };
+      return { ...base, slots, commands, lastEvent: { seq: msg.seq, kind: msg.kind, commandId: command.id, correctedId } };
     }
     case 'command.cancelled': {
       const { commandIds, reason, slots } = msg.payload;
-      return { ...base, slots, commands: markCancelled(s.commands, commandIds, reason) };
+      return {
+        ...base,
+        slots,
+        commands: markCancelled(s.commands, commandIds, reason),
+        lastEvent: { seq: msg.seq, kind: msg.kind, commandIds },
+      };
     }
     case 'parties.updated': {
       const { parties, partyConfigVersion, slots, cancelledCommandIds } = msg.payload;
       const next = reconcileMyParty({
         ...base,
+        lastEvent: { seq: msg.seq, kind: msg.kind, commandIds: cancelledCommandIds },
         parties,
         partyConfigVersion,
         slots,

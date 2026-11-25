@@ -1,21 +1,7 @@
-.mine {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 8px 16px;
-}
-.change {
-  min-height: 48px;
-  min-width: 64px;
-  padding: 0 16px;
-  color: var(--text);
-  background: var(--surface-2);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-}
-.closed {
-  margin: 16px;
-  font-size: 1.2rem;
-  font-weight: 700;
+.overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  overflow-y: auto;
+  background: var(--bg);
 }

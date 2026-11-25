@@ -1,0 +1,57 @@
+.root {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 12px 16px 24px;
+  max-width: 1280px;
+  margin: 0 auto;
+}
+.cols {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 12px;
+}
+@media (max-width: 760px) {
+  .cols {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+.stale {
+  opacity: 0.55;
+}
+.partyDot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--party-color, #888);
+  flex: none;
+}
+.row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border-left: 4px solid var(--party-color, #888);
+  background: rgba(255, 255, 255, 0.04);
+  border-radius: 6px;
+}
+.rowBody {
+  flex: 1;
+  min-width: 0;
+}
+.cancelLast {
+  min-height: 64px;
+  font-size: 1.25rem;
+  font-weight: 700;
+}
+.toasts {
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  z-index: 400;
+  max-width: min(420px, calc(100vw - 32px));
+}

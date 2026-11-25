@@ -1,0 +1,138 @@
+.hud {
+  display: flex;
+  flex-direction: column;
+  min-height: 100dvh;
+  background: var(--bg);
+}
+.top {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+.band {
+  padding: 8px 16px;
+  font-weight: 700;
+  color: #1a1400;
+}
+.band[data-tone='warn'] {
+  background: var(--warn);
+}
+.band[data-tone='danger'] {
+  color: #fff;
+  background: #b3261e;
+}
+.sound {
+  width: 100%;
+  min-height: 48px;
+  color: #04121f;
+  font-weight: 700;
+  background: var(--accent);
+  border: 0;
+  cursor: pointer;
+}
+.loading {
+  padding: 16px;
+}
+.body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 12px;
+  max-width: 720px;
+  width: 100%;
+  margin: 0 auto;
+}
+.hint {
+  margin: 0;
+  padding: 10px 12px;
+  background: var(--surface-2);
+  border: 1px dashed var(--text-dim);
+  border-radius: 10px;
+}
+.toggle {
+  width: 100%;
+  min-height: 48px;
+  text-align: left;
+  padding: 0 12px;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+.history {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.h2 {
+  margin: 0;
+  font-size: 1.05rem;
+}
+.closed {
+  display: grid;
+  place-items: center;
+  min-height: 100dvh;
+  padding: 24px;
+  text-align: center;
+}
+.focusBack {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+  background: rgb(0 0 0 / 0.7);
+}
+.focus {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: min(560px, 100%);
+}
+.focusClose {
+  min-height: 48px;
+  color: var(--text);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+
+/* wide landscape (FR-F05-8): my card left & large; grid + history right */
+@media (min-width: 900px) {
+  .body {
+    max-width: none;
+    display: grid;
+    grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr);
+    grid-template-areas:
+      'hint hint'
+      'mine grid'
+      'all  history';
+    align-items: start;
+    gap: 16px;
+    padding: 16px;
+  }
+  .hint {
+    grid-area: hint;
+  }
+  .mine {
+    grid-area: mine;
+    position: sticky;
+    top: 70px;
+  }
+  .all {
+    grid-area: all;
+  }
+  .grid {
+    grid-area: grid;
+  }
+  .history {
+    grid-area: history;
+  }
+  .body[data-unselected='true'] {
+    grid-template-areas:
+      'hint hint'
+      'all all'
+      'grid history';
+  }
+}

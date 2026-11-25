@@ -1,0 +1,70 @@
+.bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 12px;
+  padding: 6px 12px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  font-size: 0.9rem;
+}
+.conn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: currentColor;
+}
+.conn[data-tone='ok'] .dot {
+  color: var(--ok);
+}
+.conn[data-tone='warn'] .dot {
+  color: var(--warn);
+}
+.conn[data-tone='danger'] .dot {
+  color: var(--danger);
+}
+.party {
+  min-height: 44px;
+  padding: 0 12px;
+  margin-left: auto;
+  color: var(--text);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  cursor: pointer;
+}
+.cmdr {
+  padding: 2px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--text-dim);
+  color: var(--text-dim);
+}
+.cmdr[data-tone='warn'] {
+  color: #1a1400;
+  background: var(--warn);
+  border-color: var(--warn);
+  font-weight: 700;
+}
+.cmdr[data-tone='ok'] {
+  color: var(--ok);
+  border-color: var(--ok);
+}
+.count {
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+}
+.gear {
+  min-width: 44px;
+  min-height: 44px;
+  color: var(--text);
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-size: 1.2rem;
+  cursor: pointer;
+}

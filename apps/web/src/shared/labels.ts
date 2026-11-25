@@ -62,3 +62,29 @@ export function targetLabel(target: Target, parties: Party[]): string {
     })
     .join('·');
 }
+
+/** HUD-short cancel reason (F06 이력). */
+export const CANCEL_REASON_SHORT: Record<CancelReason, string> = {
+  MISRECOGNIZED: '잘못 인식',
+  CHANGED: '작전 변경',
+  PARTY_REMOVED: '파티 삭제',
+};
+
+/** Short connection text for the member status bar (F10). */
+export const HUD_CONNECTION_LABEL: Record<ConnectionStatus, string> = {
+  CONNECTING: '연결 중…',
+  CONNECTED: '연결됨',
+  RECONNECTING: '다시 연결 중…',
+  OFFLINE: '인터넷 연결 없음',
+  CLOSED: '종료',
+  REPLACED: '다른 탭에서 열림',
+};
+
+/** "1·2파티" for a party list. */
+export function partyNumbersLabel(parties: Party[], ids: string[]): string {
+  const nums = ids
+    .map((id) => partyById(parties, id)?.number)
+    .filter((n): n is number => n !== undefined)
+    .sort((a, b) => a - b);
+  return nums.length ? `${nums.join('·')}파티` : '?';
+}

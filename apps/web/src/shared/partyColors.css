@@ -13,3 +13,14 @@
   --p11: #8fd1a6;
   --p12: #c9a36b;
 }
+
+/* Action color tokens (F05 시각 언어). Always paired with an icon and a word. */
+:root {
+  --act-gather: #5aa9ff;
+  --act-move: #f2f4f8;
+  --act-attack: #ff6b61;
+  --act-defend: #35d0c2;
+  --act-retreat: #ff9a4d;
+  --act-support: #5fd68a;
+  --act-hold: #aab0bb;
+}

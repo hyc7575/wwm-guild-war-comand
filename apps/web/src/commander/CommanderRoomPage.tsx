@@ -3,14 +3,13 @@ import { Anchor, Stack, Text } from '@mantine/core';
 import { normalizeRoomCode } from '@winds/protocol';
 import { RoomSession } from '../net/RoomSession';
 import { loadRoomTokens } from '../net/session';
-import { DebugCommandPanel } from '../shared/DebugCommandPanel';
 import { NoticeToast } from '../shared/NoticeToast';
-import { RoomOverview } from '../shared/RoomOverview';
 import { StatusBar } from '../shared/StatusBar';
 import { useRoomStore } from '../state/roomStore';
-import { InvitePanel } from './InvitePanel';
+import { Console } from './console/Console';
+import { ConsoleProvider } from './console/ConsoleProvider';
 
-/** /c/:code. Placeholder: the F08 commander console replaces the body later. */
+/** /c/:code: the F08 commander console. */
 export default function CommanderRoomPage() {
   const code = normalizeRoomCode(useParams().code ?? '');
   const tokens = loadRoomTokens(code);
@@ -43,9 +42,9 @@ function CommanderBody({ code, operatorToken }: { code: string; operatorToken?: 
           다른 탭에서 열렸습니다. 이 탭은 더 이상 명령을 보낼 수 없습니다.
         </Text>
       )}
-      <InvitePanel code={code} operatorToken={operatorToken} />
-      <RoomOverview />
-      <DebugCommandPanel />
+      <ConsoleProvider>
+        <Console mode="commander" code={code} operatorToken={operatorToken} />
+      </ConsoleProvider>
       <NoticeToast />
     </>
   );

@@ -1,0 +1,116 @@
+import { describe, expect, it } from 'vitest';
+import { makeDefaultParties, type Command } from '@winds/protocol';
+import { create } from 'zustand';
+import { initialRoomData, applyServerMessage, type RoomData } from '../../state/roomReducer';
+import { MemoryTuningLog } from '../pipeline/tuningLog';
+import { SessionMetrics } from '../metrics';
+import { ConsoleController, type ConsoleStore } from './ConsoleController';
+import { findCurrentAllCommand, findLastActive } from './selectors';
+
+const cmd = (id: string, seq: number, partyIds: string[] | 'ALL', extra: Partial<Command> = {}): Command => ({
+  id,
+  seq,
+  target: partyIds === 'ALL' ? { kind: 'ALL' } : { kind: 'PARTIES', partyIds },
+  action: 'ATTACK',
+  status: 'ACTIVE',
+  source: 'MANUAL',
+  issuedAt: 1,
+  repeatCount: 0,
+  ...extra,
+});
+
+function harness() {
+  const useStore = create<RoomData & { dismissUnsent(id: string): void }>(() => ({
+    ...initialRoomData(),
+    parties: makeDefaultParties(3),
+    dismissUnsent() {},
+  }));
+  const sent: Array<{ id: string; input: any }> = [];
+  const client = {
+    request: (input: any) => {
+      const id = `r${sent.length + 1}`;
+      sent.push({ id, input });
+      return id;
+    },
+    send: () => true,
+  };
+  const metrics = new SessionMetrics();
+  const c = new ConsoleController({
+    client,
+    store: useStore as unknown as ConsoleStore,
+    tuningLog: new MemoryTuningLog(),
+    metrics,
+  });
+  const apply = (msg: any) => useStore.setState((s) => applyServerMessage(s, msg));
+  return { c, sent, useStore, apply, metrics };
+}
+
+describe('selectors', () => {
+  it('current commands come from slots; last active = highest seq; ALL line', () => {
+    const state = {
+      slots: { p1: ['A', 'B'], p2: ['A'], p3: [] },
+      commands: { A: cmd('A', 1, 'ALL'), B: cmd('B', 2, ['p1']), C: cmd('C', 3, ['p3'], { status: 'CANCELLED' }) },
+    };
+    expect(findLastActive(state)?.id).toBe('B');
+    expect(findLastActive(state, new Set(['B']))?.id).toBe('A');
+    expect(findCurrentAllCommand(state)?.id).toBe('A');
+  });
+});
+
+describe('ConsoleController', () => {
+  it('manual issue sends source MANUAL and counts it', () => {
+    const { c, sent, metrics } = harness();
+    c.issueManual({ target: { kind: 'PARTIES', partyIds: ['p3'] }, action: 'DEFEND', location: { id: 'RIGHT', label: '우측' } });
+    expect(sent[0]!.input).toMatchObject({ type: 'command.issue', source: 'MANUAL', action: 'DEFEND' });
+    expect(metrics.snapshot().issuedManual).toBe(1);
+  });
+
+  it('cancelLast walks back through commands even before cancel events arrive', () => {
+    const { c, sent, useStore } = harness();
+    useStore.setState({
+      slots: { p1: ['A', 'B'], p2: ['A', 'C'], p3: ['A'] },
+      commands: { A: cmd('A', 1, 'ALL'), B: cmd('B', 2, ['p1']), C: cmd('C', 3, ['p2'], { source: 'VOICE' }) },
+    });
+    c.cancelLast();
+    c.cancelLast();
+    c.cancelLast();
+    expect(sent.map((s) => s.input.commandId)).toEqual(['C', 'B', 'A']);
+    expect(c.cancelLast()).toBeUndefined();
+  });
+
+  it('a failed cancel can be retried', () => {
+    const { c, sent, useStore, apply } = harness();
+    useStore.setState({ slots: { p1: ['B'] }, commands: { B: cmd('B', 2, ['p1']) } });
+    c.cancelLast();
+    apply({ v: 1, type: 'ack', clientCmdId: 'r1', error: 'RATE_LIMITED' });
+    c.cancelLast();
+    expect(sent).toHaveLength(2);
+  });
+
+  it('acks in the store reach the tracker', () => {
+    const { c, apply } = harness();
+    const id = c.issueManual({ target: { kind: 'ALL' }, action: 'HOLD' });
+    apply({ v: 1, type: 'ack', clientCmdId: id, commandId: 'X', note: 'REPEATED' });
+    expect(c.tracker.get(id)?.ack).toMatchObject({ commandId: 'X', note: 'REPEATED' });
+  });
+
+  it('previewText: parses typed text, "해석할 수 없습니다" case yields no drafts', () => {
+    const { c } = harness();
+    expect(c.previewText('3파티 우측 방어').labels).toEqual(['3파티 방어 우측']);
+    expect(c.previewText('상대 많네요').drafts).toEqual([]);
+    expect(c.previewText('   ').drafts).toEqual([]);
+  });
+
+  it('issueText issues each parsed draft as MANUAL; party editor request carries baseVersion', () => {
+    const { c, sent } = harness();
+    expect(c.issueText('3파티 우측 방어')).toBe(1);
+    expect(sent[0]!.input.source).toBe('MANUAL');
+    c.updateParties(4, makeDefaultParties(2), () => {});
+    expect(sent[1]!.input).toMatchObject({ type: 'parties.update', baseVersion: 4 });
+  });
+
+  it('locations() lists the F08 order first', () => {
+    expect(harness().c.locations().map((l) => l.label).slice(0, 5)).toEqual(['좌측', '중앙', '우측', '앞', '뒤']);
+  });
+});
+

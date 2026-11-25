@@ -4,11 +4,10 @@ import { Anchor, Stack, Text } from '@mantine/core';
 import { normalizeRoomCode } from '@winds/protocol';
 import { RoomSession } from '../net/RoomSession';
 import { loadRoomTokens, saveRoomTokens } from '../net/session';
-import { DebugCommandPanel } from '../shared/DebugCommandPanel';
 import { NoticeToast } from '../shared/NoticeToast';
-import { RoomOverview } from '../shared/RoomOverview';
 import { StatusBar } from '../shared/StatusBar';
-import { useRoomStore } from '../state/roomStore';
+import { Console } from '../commander/console/Console';
+import { ConsoleProvider } from '../commander/console/ConsoleProvider';
 
 /** /o/:code#token (operator). Stores the token from the URL fragment, then connects as OPERATOR. */
 export default function OperatorPage() {
@@ -39,30 +38,18 @@ export default function OperatorPage() {
   }
   return (
     <RoomSession code={code} role="OPERATOR" token={token}>
-      <OperatorBody />
+      <OperatorBody code={code} />
     </RoomSession>
   );
 }
 
-function OperatorBody() {
-  const feed = useRoomStore((s) => s.sttFeed);
+function OperatorBody({ code }: { code: string }) {
   return (
     <>
       <StatusBar />
-      <RoomOverview />
-      <DebugCommandPanel />
-      {feed.length > 0 && (
-        <Stack gap={2} p="md">
-          <Text size="sm" c="dimmed">
-            인식 원문
-          </Text>
-          {feed.slice(-5).map((e) => (
-            <Text key={e.id} size="sm">
-              {e.text} · {e.outcome}
-            </Text>
-          ))}
-        </Stack>
-      )}
+      <ConsoleProvider>
+        <Console mode="operator" code={code} />
+      </ConsoleProvider>
       <NoticeToast />
     </>
   );

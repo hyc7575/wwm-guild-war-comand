@@ -1,0 +1,155 @@
+.card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 12px;
+  min-height: 50dvh;
+  padding: 16px;
+  text-align: center;
+  background: var(--surface);
+  border: 3px solid var(--party-color, var(--border));
+  border-radius: 16px;
+  font-size: calc(1rem * var(--hud-fs, 1));
+  transition: opacity 0.2s, border-color 0.2s, background-color 0.2s;
+}
+.card[data-stale='true'] {
+  opacity: 0.6;
+}
+.card[data-dimmed='true'] {
+  opacity: 0.4;
+  filter: saturate(0.5);
+}
+.card[data-empty='true'] {
+  color: var(--text-dim);
+}
+
+/* new command: border flash 1s */
+.card[data-flash='true'] {
+  animation: flash 1s ease-out;
+  border-color: #fff;
+}
+@keyframes flash {
+  0%, 40% {
+    border-color: #fff;
+    box-shadow: 0 0 0 6px var(--card-accent), 0 0 32px var(--card-accent);
+  }
+  100% {
+    box-shadow: 0 0 0 0 transparent;
+  }
+}
+/* repeat: one scale pulse */
+.card[data-pulse='true'] {
+  animation: pulse 0.45s ease-out;
+}
+@keyframes pulse {
+  50% {
+    transform: scale(1.04);
+  }
+}
+/* cancel: strike-through 0.5s */
+.card[data-struck='true'] .action,
+.card[data-struck='true'] .location,
+.card[data-struck='true'] .arrow {
+  text-decoration: line-through;
+  text-decoration-thickness: 0.12em;
+}
+.card[data-struck='true'] {
+  opacity: 0.55;
+}
+
+.badges {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+}
+.badge {
+  padding: 4px 12px;
+  font-size: 0.95em;
+  font-weight: 700;
+  color: var(--text);
+  background: var(--surface-2);
+  border: 1px solid var(--text-dim);
+  border-radius: 999px;
+}
+.fix {
+  color: #1a1400;
+  background: var(--warn);
+  border-color: var(--warn);
+}
+.support {
+  color: #04180d;
+  background: var(--act-support);
+  border-color: var(--act-support);
+}
+.main {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+}
+.action {
+  font-size: 3.2em;
+  font-weight: 800;
+  line-height: 1.1;
+  color: var(--card-accent);
+}
+.location {
+  font-size: 2.2em;
+  font-weight: 700;
+  line-height: 1.1;
+}
+.arrow {
+  font-size: 1.6em;
+  font-weight: 700;
+  color: var(--act-support);
+}
+.foot {
+  font-size: 1.05em;
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+}
+.none {
+  margin: 0;
+  font-size: 1.6em;
+}
+.restore {
+  margin: 0;
+  align-self: center;
+  padding: 6px 14px;
+  font-weight: 700;
+  color: #1a1400;
+  background: var(--warn);
+  border-radius: 999px;
+}
+/* corrected parts */
+.card [data-changed='true'] {
+  background: rgb(230 180 34 / 0.28);
+  outline: 2px solid var(--warn);
+  outline-offset: 2px;
+  border-radius: 8px;
+}
+
+/* reduced motion: color change only (FR-F05-9) */
+:global([data-reduced-motion='true']) .card,
+:global([data-reduced-motion='true']) .card[data-flash='true'],
+:global([data-reduced-motion='true']) .card[data-pulse='true'] {
+  animation: none;
+  transform: none;
+  transition: none;
+}
+:global([data-reduced-motion='true']) .card[data-flash='true'] {
+  background: #243a5a;
+  border-color: #fff;
+  box-shadow: none;
+}
+:global([data-reduced-motion='true']) .card[data-pulse='true'] {
+  background: #2f2f4a;
+}
+
+@media (max-width: 899px) and (orientation: landscape) {
+  .card {
+    min-height: 0;
+  }
+}
