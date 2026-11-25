@@ -15,9 +15,8 @@ function stamp(ts: number): string {
   return `${p(d.getMonth() + 1)}/${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
 }
 
-const STATUS_LABEL: Record<HistoryEntry['status'], string> = {
-  ACTIVE: '진행',
-  SUPERSEDED: '대체됨',
+/** Stored status is the last one this browser saw: "진행"/"대체됨" cannot be told apart later, so only corrections and cancels are tagged. */
+const STATUS_LABEL: Partial<Record<HistoryEntry['status'], string>> = {
   CORRECTED: '정정됨',
   CANCELLED: '취소',
 };
@@ -31,10 +30,12 @@ function Row({ e }: { e: HistoryEntry }) {
         {e.location ? ` ${e.location}` : ''}
         {e.support?.length ? ` (지원 ${e.support.join('·')}파티)` : ''}
       </span>
-      <span className={styles.tag}>
-        {STATUS_LABEL[e.status]}
-        {e.status === 'CANCELLED' && e.cancelReason ? `: ${CANCEL_REASON_SHORT[e.cancelReason]}` : ''}
-      </span>
+      {STATUS_LABEL[e.status] && (
+        <span className={styles.tag}>
+          {STATUS_LABEL[e.status]}
+          {e.status === 'CANCELLED' && e.cancelReason ? `: ${CANCEL_REASON_SHORT[e.cancelReason]}` : ''}
+        </span>
+      )}
       {e.issuerRole && <span className={styles.tag}>{ISSUER_LABEL[e.issuerRole]}</span>}
       {e.transcript && <span className={styles.transcript}>“{e.transcript}”</span>}
     </li>
@@ -52,13 +53,23 @@ export interface PastHistoryProps {
 export function PastHistory({ roomCode, currentIds, history }: PastHistoryProps) {
   const [open, setOpen] = useState(false);
   const [rooms, setRooms] = useState<RoomHistory[] | null>(null);
+  const [unavailable, setUnavailable] = useState(false);
 
   useEffect(() => {
     if (!open) return;
     let alive = true;
-    void (history ?? getHistoryStore()).listRooms().then((r) => alive && setRooms(r));
+    const store = history ?? getHistoryStore();
+    const load = () =>
+      void store.listRooms().then((r) => {
+        if (!alive) return;
+        setRooms(r);
+        setUnavailable(!store.available);
+      });
+    load();
+    const off = store.subscribe(load);
     return () => {
       alive = false;
+      off();
     };
   }, [open, history]);
 
@@ -91,6 +102,11 @@ export function PastHistory({ roomCode, currentIds, history }: PastHistoryProps)
             ))
           ) : (
             <p className={styles.empty}>없음</p>
+          )}
+          {unavailable && (
+            <p className={styles.note} role="status" data-testid="past-unavailable">
+              이 브라우저에서 이력 저장 불가
+            </p>
           )}
           <p className={styles.note}>이 브라우저에만 저장된 최근 이력입니다(다른 기기와 동기화되지 않음).</p>
         </div>

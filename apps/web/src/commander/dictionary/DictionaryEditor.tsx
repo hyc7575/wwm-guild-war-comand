@@ -11,11 +11,13 @@ import {
   addLocation,
   addLocationAlias,
   findActionOwner,
+  hasMergeDiff,
   isDisabled,
   removeActionExpression,
   removeLocation,
   removeLocationAlias,
   setBaseDisabled,
+  type MergeDiff,
 } from './editing';
 import { getDictionaryStore, type DictionaryStore } from './store';
 import { suggestFromTuningLog } from './suggest';
@@ -64,6 +66,8 @@ function Body({ store, readTuningLog }: { store: DictionaryStore; readTuningLog?
   return (
     <Stack gap="sm">
       {error && <Alert color="red" data-testid="dict-error">{error}</Alert>}
+      {store.getLoadNote() && <Alert color="orange" data-testid="dict-load-note">{store.getLoadNote()}</Alert>}
+      {store.getSaveError() && <Alert color="red" data-testid="dict-save-error">{store.getSaveError()}</Alert>}
       {conflicts.length > 0 && (
         <Alert color="yellow" title="충돌 경고" data-testid="dict-conflicts">
           {conflicts.map((c) => (
@@ -338,6 +342,24 @@ function ShareTab({ store, alliance }: { store: DictionaryStore; alliance: Dicti
   const [review, setReview] = useState<{ dictionary: Dictionary; warnings: string[] } | null>(null);
   const [errors, setErrors] = useState<string[]>([]);
   const [done, setDone] = useState<string | null>(null);
+  const [applyError, setApplyError] = useState<string | null>(null);
+
+  /** Merge/overwrite can break the schema limits (list 500, locations 100): show it instead of throwing. */
+  const runImport = (dictionary: Dictionary, mode: 'merge' | 'overwrite') => {
+    try {
+      store.importDictionary(dictionary, mode);
+    } catch {
+      setApplyError(
+        mode === 'merge'
+          ? '합친 결과가 사전 한도(행동별 표현 500개, 위치 100개 등)를 넘어 적용하지 못했습니다. 현재 사전은 그대로입니다. 필요 없는 표현을 지운 뒤 다시 시도하세요.'
+          : '가져온 사전을 적용하지 못했습니다. 현재 사전은 그대로입니다.',
+      );
+      return;
+    }
+    setApplyError(null);
+    setReview(null);
+    setDone(mode === 'merge' ? '합쳤습니다.' : '덮어썼습니다.');
+  };
 
   const doExport = () => {
     const blob = new Blob([serializeDictionary(alliance)], { type: 'application/json' });
@@ -351,6 +373,7 @@ function ShareTab({ store, alliance }: { store: DictionaryStore; alliance: Dicti
 
   const check = (text: string) => {
     setDone(null);
+    setApplyError(null);
     setReview(null);
     let json: unknown;
     try {
@@ -406,15 +429,12 @@ function ShareTab({ store, alliance }: { store: DictionaryStore; alliance: Dicti
           {review.warnings.map((w, i) => (
             <Text key={i} size="sm" c="orange">{w}</Text>
           ))}
+          <MergeDiffView diff={store.previewMerge(review.dictionary).diff} />
           <Text size="sm">현재 동맹 사전을 어떻게 할까요?</Text>
           <Group gap="xs" mt="xs">
             <Button
               size="xs"
-              onClick={() => {
-                store.importDictionary(review.dictionary, 'merge');
-                setReview(null);
-                setDone('합쳤습니다.');
-              }}
+              onClick={() => runImport(review.dictionary, 'merge')}
               data-testid="dict-import-merge"
             >
               합치기
@@ -422,11 +442,7 @@ function ShareTab({ store, alliance }: { store: DictionaryStore; alliance: Dicti
             <Button
               size="xs"
               color="red"
-              onClick={() => {
-                store.importDictionary(review.dictionary, 'overwrite');
-                setReview(null);
-                setDone('덮어썼습니다.');
-              }}
+              onClick={() => runImport(review.dictionary, 'overwrite')}
               data-testid="dict-import-overwrite"
             >
               덮어쓰기
@@ -434,8 +450,33 @@ function ShareTab({ store, alliance }: { store: DictionaryStore; alliance: Dicti
           </Group>
         </Alert>
       )}
+      {applyError && <Alert color="red" data-testid="dict-import-apply-error">{applyError}</Alert>}
       {done && <Alert color="green" data-testid="dict-import-done">{done}</Alert>}
       <Text size="xs" c="dimmed">사전은 이 브라우저에만 저장되고 서버로 올라가지 않습니다. 다른 지휘관과 나누려면 파일로 내보내 주세요.</Text>
+    </Stack>
+  );
+}
+
+function MergeDiffView({ diff }: { diff: MergeDiff }) {
+  if (!hasMergeDiff(diff)) return <Text size="sm" data-testid="dict-merge-diff-none">합쳐도 현재 사전의 기존 항목이 바뀌지 않습니다.</Text>;
+  return (
+    <Stack gap={2} my="xs" data-testid="dict-merge-diff">
+      <Text size="sm" fw={600}>합치면 달라지는 점</Text>
+      {diff.renamedLocations.map((r) => (
+        <Text key={r.to} size="sm" c="orange">
+          위치 id 충돌: 내 "{r.clashedWith}"과(와) 가져온 "{r.label}"이(가) 같은 id({r.from})입니다. 가져온 쪽에 새 id({r.to})를 붙여 둘 다 유지합니다.
+        </Text>
+      ))}
+      {diff.labelChanges.map((l) => (
+        <Text key={l.id} size="sm" c="orange">
+          위치 {l.id}의 이름이 "{l.from}"에서 "{l.to}"(으)로 바뀝니다.
+        </Text>
+      ))}
+      {diff.movedExpressions.map((m) => (
+        <Text key={m.expression} size="sm" c="orange">
+          "{m.expression}": {ACTION_LABEL[m.from]} → {ACTION_LABEL[m.to]}(으)로 행동이 바뀝니다.
+        </Text>
+      ))}
     </Stack>
   );
 }

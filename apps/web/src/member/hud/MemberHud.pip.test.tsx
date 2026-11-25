@@ -123,6 +123,10 @@ describe('PiP small window', () => {
     expect(within(pip.doc.body).getByTestId('pip-card-action').textContent).toContain('공격');
     expect(playBeep).toHaveBeenCalledTimes(1);
 
+    // main-order disconnect shows in the PiP too
+    act(() => useRoomStore.setState({ connection: 'CONNECTED', presence: { ...useRoomStore.getState().presence, commanderOnline: false } }));
+    expect(within(pip.doc.body).getByTestId('pip-status-commander').textContent).toContain('메인오더 연결 끊김');
+
     // reconnecting banner shows in the PiP too
     act(() => useRoomStore.getState().setConnection('RECONNECTING', null));
     expect(within(pip.doc.body).getByTestId('pip-banner-reconnecting')).toBeTruthy();
@@ -130,6 +134,19 @@ describe('PiP small window', () => {
     act(() => pip.userClose());
     expect(screen.queryByTestId('pip-active')).toBeNull();
     expect(screen.getByTestId('my-party-card')).toBeInTheDocument();
+  });
+
+  it('shows a short error when the window cannot be opened', async () => {
+    const pip = installFakePip();
+    pip.requestWindow.mockRejectedValueOnce(new Error('denied'));
+    setup();
+    welcome();
+    render(<MemberHud onChangeParty={() => undefined} />);
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('open-pip'));
+    });
+    expect(screen.getByTestId('pip-error')).toHaveTextContent('열지 못했습니다');
+    expect(screen.queryByTestId('pip-active')).toBeNull();
   });
 
   it('font step is reflected in the PiP card', async () => {

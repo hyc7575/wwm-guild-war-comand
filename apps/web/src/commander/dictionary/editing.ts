@@ -90,3 +90,63 @@ export function mergeAlliance(current: Dictionary, incoming: Dictionary): Dictio
   // `disabled` refers to the built-in dictionary, so it is unioned instead of being applied to our own entries.
   return { ...merged, disabled };
 }
+
+export interface MergeDiff {
+  /** Incoming CUSTOM_n locations that got a new id because the id was taken by a different location. */
+  renamedLocations: Array<{ from: string; to: string; label: string; clashedWith: string }>;
+  /** Same id (a built-in location override), different label: the incoming label wins. */
+  labelChanges: Array<{ id: string; from: string; to: string }>;
+  /** Expressions whose effective action changes (current alliance + base -> after merge). */
+  movedExpressions: Array<{ expression: string; from: Action; to: Action }>;
+}
+
+const CUSTOM_ID = /^CUSTOM_\d+$/;
+
+/** Gives incoming CUSTOM_n ids that clash with `current` a fresh id. Aliases and labels are kept. */
+function remapIncomingLocations(current: Dictionary, incoming: Dictionary): { dictionary: Dictionary; renamed: MergeDiff['renamedLocations'] } {
+  const currentById = new Map(current.locations.map((l) => [l.id, l]));
+  const taken = new Set([...currentById.keys(), ...incoming.locations.map((l) => l.id)]);
+  const renamed: MergeDiff['renamedLocations'] = [];
+  const locations = incoming.locations.map((l) => {
+    const clash = currentById.get(l.id);
+    if (!CUSTOM_ID.test(l.id) || !clash || same(clash.label, l.label)) return l; // same place (or a built-in id): merges as before
+    let n = 1;
+    while (taken.has(`CUSTOM_${n}`)) n++;
+    const id = `CUSTOM_${n}`;
+    taken.add(id);
+    renamed.push({ from: l.id, to: id, label: l.label, clashedWith: clash.label });
+    return { ...l, id };
+  });
+  return { dictionary: { ...incoming, locations }, renamed };
+}
+
+function effectiveActionOf(d: Dictionary): Map<string, { expression: string; action: Action }> {
+  const m = new Map<string, { expression: string; action: Action }>();
+  for (const a of ACTIONS) for (const e of d.actions[a]) m.set(compactExpression(e), { expression: e, action: a });
+  return m;
+}
+
+/**
+ * What "합치기" would do: the merged alliance dictionary (clashing CUSTOM ids renumbered) and the
+ * differences the user should see before confirming. `base` is the built-in dictionary.
+ */
+export function planMerge(current: Dictionary, incoming: Dictionary, base: Dictionary): { result: Dictionary; diff: MergeDiff } {
+  const { dictionary: remapped, renamed } = remapIncomingLocations(current, incoming);
+  const result = mergeAlliance(current, remapped);
+  const before = effectiveActionOf(mergeDictionaries(base, current));
+  const after = effectiveActionOf(mergeDictionaries(base, result));
+  const movedExpressions: MergeDiff['movedExpressions'] = [];
+  for (const [k, b] of before) {
+    const a = after.get(k);
+    if (a && a.action !== b.action) movedExpressions.push({ expression: b.expression, from: b.action, to: a.action });
+  }
+  const effLocs = new Map([...base.locations, ...current.locations].map((l) => [l.id, l.label]));
+  const labelChanges: MergeDiff['labelChanges'] = [];
+  for (const l of remapped.locations) {
+    const was = effLocs.get(l.id);
+    if (was !== undefined && !same(was, l.label)) labelChanges.push({ id: l.id, from: was, to: l.label });
+  }
+  return { result, diff: { renamedLocations: renamed, labelChanges, movedExpressions } };
+}
+
+export const hasMergeDiff = (d: MergeDiff) => d.renamedLocations.length + d.labelChanges.length + d.movedExpressions.length > 0;

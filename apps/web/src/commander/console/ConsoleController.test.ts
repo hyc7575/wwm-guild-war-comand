@@ -114,6 +114,19 @@ describe('ConsoleController', () => {
     expect(c.cancelLast()).toBeUndefined();
   });
 
+  it('preset cancels are counted apart from manual cancels, and only when the server accepts', () => {
+    const { c, sent, apply, metrics } = harness();
+    const acks: any[] = [];
+    c.cancelCommand('B', { origin: 'PRESET', onAck: (a) => acks.push(a) });
+    c.cancelCommand('C', { origin: 'PRESET', onAck: (a) => acks.push(a) });
+    apply({ v: 1, type: 'ack', clientCmdId: sent[0]!.id, error: 'RATE_LIMITED' });
+    apply({ v: 1, type: 'ack', clientCmdId: sent[1]!.id, commandId: 'C' });
+    expect(acks.map((a) => !!a.error)).toEqual([true, false]);
+    expect(metrics.snapshot()).toMatchObject({ cancelledPreset: 1, cancelledManual: 0 });
+    c.cancelCommand('D');
+    expect(metrics.snapshot().cancelledManual).toBe(1);
+  });
+
   it('a failed cancel can be retried', () => {
     const { c, sent, useStore, apply } = harness();
     useStore.setState({ slots: { p1: ['B'] }, commands: { B: cmd('B', 2, ['p1']) } });

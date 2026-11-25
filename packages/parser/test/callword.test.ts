@@ -24,6 +24,12 @@ describe('extractCallword', () => {
   it('a filler with a digit is a command fragment, not a filler', () => {
     expect(extractCallword('1파티 오더 방어', on())).toEqual({ kind: 'NONE' });
   });
+  it('a Korean-numeral or dictionary-slot filler is a command fragment too', () => {
+    for (const t of ['일파티 오더 공격', '삼 파티 오더 후퇴', '1파티 오더 공격', '일 파티 오더 방어', '공격 오더 전체']) {
+      expect(extractCallword(t, on()), t).toEqual({ kind: 'NONE' });
+    }
+    expect(extractCallword('자 오더 일파티 공격', on())).toEqual({ kind: 'COMMAND', text: '일파티 공격' });
+  });
   it('does not match words that merely contain the call word', () => {
     expect(extractCallword('오더링 전체 집결', on())).toEqual({ kind: 'NONE' });
   });

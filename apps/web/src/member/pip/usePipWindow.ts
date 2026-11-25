@@ -18,6 +18,7 @@ export function usePipWindow(adapter?: PipAdapter): PipState {
   const handle = useRef<PipWindowHandle | null>(null);
   const unsub = useRef<(() => void) | null>(null);
   const opening = useRef(false);
+  const mounted = useRef(true);
 
   const release = useCallback(() => {
     unsub.current?.();
@@ -45,6 +46,11 @@ export function usePipWindow(adapter?: PipAdapter): PipState {
     setError(null);
     try {
       const h = await ad.open();
+      if (!mounted.current) {
+        // the HUD went away while the window was opening: do not leave an orphan window behind
+        h.close();
+        return;
+      }
       handle.current = h;
       unsub.current = h.onClose(release);
       setWin(h.window);
@@ -57,9 +63,11 @@ export function usePipWindow(adapter?: PipAdapter): PipState {
 
   // closing the main page (reload, tab close, route change) closes the PiP too
   useEffect(() => {
+    mounted.current = true;
     const onHide = () => handle.current?.close();
     window.addEventListener('pagehide', onHide);
     return () => {
+      mounted.current = false;
       window.removeEventListener('pagehide', onHide);
       const h = handle.current;
       unsub.current?.();

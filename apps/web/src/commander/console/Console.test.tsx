@@ -276,6 +276,7 @@ describe('Console (commander)', () => {
     mount();
     fireEvent.click(tid('invite-open'));
     expect((tid('invite-link') as HTMLInputElement).value).toMatch(/\/r\/K7M2QX$/);
+    fireEvent.click(tid('remote-reveal'));
     expect((tid('operator-link') as HTMLInputElement).value).toMatch(/\/o\/K7M2QX#optok$/);
   });
 
@@ -284,6 +285,8 @@ describe('Console (commander)', () => {
     Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true });
     const { unmount } = mount('commander', false, { subCommanderToken: 'subtok' });
     fireEvent.click(tid('invite-open'));
+    expect(screen.queryByTestId('sub-link')).toBeNull();
+    fireEvent.click(tid('remote-reveal'));
     expect((tid('sub-link') as HTMLInputElement).value).toMatch(/\/s\/K7M2QX#subtok$/);
     expect(screen.getByText(/전체 파티에 명령 가능, 방 설정은 못 함/)).toBeInTheDocument();
     await act(async () => {

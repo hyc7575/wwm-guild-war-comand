@@ -100,4 +100,22 @@ describe('RemoteConsole', () => {
       expect(sent).toHaveLength(0);
     });
   });
+
+  it('closed by the server shows a reason-specific message, not "오더방이 종료되었습니다"', async () => {
+    useRoomStore.setState({ connection: 'CLOSED', closeReason: 'UNAUTHORIZED' });
+    await Promise.resolve();
+    expect(tid('remote-status')).toHaveTextContent('리모컨 링크가 올바르지 않거나 만료');
+    useRoomStore.setState({ closeReason: 'ROOM_FULL' });
+    await Promise.resolve();
+    expect(tid('remote-status')).toHaveTextContent('방이 가득 찼습니다');
+    useRoomStore.setState({ closeReason: 'ROOM_CLOSED' });
+    await Promise.resolve();
+    expect(tid('remote-status')).toHaveTextContent('오더방이 종료되었습니다');
+  });
+
+  it('publish and cancel row sits outside the scrolling area', () => {
+    const scroll = tid('remote-panel').firstElementChild!;
+    expect(scroll.contains(tid('remote-publish'))).toBe(false);
+    expect(scroll.contains(tid('remote-target-1'))).toBe(true);
+  });
 });

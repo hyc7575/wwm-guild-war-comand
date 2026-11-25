@@ -99,4 +99,18 @@ describe('12 party grid', () => {
     expect(cellNumbers()).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]);
     expect(screen.getByTestId('party-cell-2')).not.toHaveAttribute('data-compact');
   });
+
+  it('no party chosen on a wide screen: no inline columns, so the large-cell CSS (minmax 170px) applies', () => {
+    const mm = window.matchMedia;
+    window.matchMedia = ((q: string) => ({ matches: q.includes('min-width: 900px') || q.includes('min-width: 600px'), media: q, addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {}, onchange: null, dispatchEvent: () => false })) as never;
+    try {
+      useRoomStore.getState().reset();
+      useRoomStore.getState().attach('ABC234', 'MEMBER', null);
+      welcome(12, []);
+      render(<MemberHud onChangeParty={() => undefined} />);
+      expect(screen.getByLabelText('파티별 명령').style.gridTemplateColumns).toBe('');
+    } finally {
+      window.matchMedia = mm;
+    }
+  });
 });

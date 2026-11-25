@@ -37,19 +37,57 @@ describe('PastHistory', () => {
 });
 
 describe('HistorySettingsSection', () => {
-  it('toggles transcript saving (default off) and clears history', async () => {
+  it('toggles transcript saving (default off); turning it off deletes stored transcripts', async () => {
     localStorage.clear();
     useHistorySettings.getState().reload();
     const history = new HistoryStore(memoryKv());
-    await history.record('R', [e('a', 1)]);
+    await history.record('R', [e('a', 1, { transcript: '원문' })]);
     render(<HistorySettingsSection history={history} />);
     const box = screen.getByTestId('opt-save-transcript') as HTMLInputElement;
     expect(box.checked).toBe(false);
     fireEvent.click(box);
     expect(useHistorySettings.getState().saveTranscript).toBe(true);
+    expect((await history.listRooms())[0]?.entries[0]?.transcript).toBe('원문');
+    fireEvent.click(box);
+    await waitFor(async () => expect((await history.listRooms())[0]?.entries[0]?.transcript).toBeUndefined());
+    expect(useHistorySettings.getState().saveTranscript).toBe(false);
+  });
+
+  it('clearing asks first, cancel keeps data, confirm clears and refreshes an open list', async () => {
+    const history = new HistoryStore(memoryKv());
+    await history.record('ZZZ999', [e('z', 1)]);
+    render(
+      <>
+        <PastHistory roomCode="ABC234" currentIds={new Set()} history={history} />
+        <HistorySettingsSection history={history} />
+      </>,
+    );
+    fireEvent.click(screen.getByTestId('past-toggle'));
+    await waitFor(() => expect(screen.getAllByTestId('past-row')).toHaveLength(1));
     fireEvent.click(screen.getByTestId('history-clear'));
-    await waitFor(() => screen.getByRole('status'));
+    fireEvent.click(screen.getByTestId('history-clear-cancel'));
+    expect((await history.listRooms()).length).toBe(1);
+    fireEvent.click(screen.getByTestId('history-clear'));
+    fireEvent.click(screen.getByTestId('history-clear-confirm'));
+    await waitFor(() => expect(screen.queryAllByTestId('past-row')).toHaveLength(0));
     expect(await history.listRooms()).toEqual([]);
-    useHistorySettings.getState().setSaveTranscript(false);
+  });
+});
+
+describe('PastHistory availability and status', () => {
+  it('says saving is impossible when the store failed', async () => {
+    const history = new HistoryStore({ get: async () => { throw new Error('x'); }, set: async () => undefined, del: async () => undefined, keys: async () => ['k'] });
+    render(<PastHistory roomCode="ABC234" currentIds={new Set()} history={history} />);
+    fireEvent.click(screen.getByTestId('past-toggle'));
+    await waitFor(() => expect(screen.getByTestId('past-unavailable')).toHaveTextContent('이력 저장 불가'));
+  });
+
+  it('does not label stored ACTIVE entries as "진행"', async () => {
+    const history = new HistoryStore(memoryKv());
+    await history.record('ABC234', [e('old', 1)]);
+    render(<PastHistory roomCode="ABC234" currentIds={new Set()} history={history} />);
+    fireEvent.click(screen.getByTestId('past-toggle'));
+    await waitFor(() => expect(screen.getAllByTestId('past-row')).toHaveLength(1));
+    expect(screen.getByTestId('past-row').textContent).not.toContain('진행');
   });
 });

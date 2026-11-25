@@ -6,6 +6,7 @@ test('6. 운영자: 인식 피드, 취소, 관리 기능 없음', async ({ brows
   const m1 = await joinMember(browser, cmd.code, 1);
 
   await cmd.page.getByTestId('invite-open').click();
+  await cmd.page.getByTestId('remote-reveal').click();
   const opUrl = await cmd.page.getByTestId('operator-link').inputValue();
   expect(opUrl).toMatch(new RegExp(`/o/${cmd.code}#.+`));
   await cmd.page.keyboard.press('Escape');

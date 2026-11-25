@@ -5,7 +5,26 @@ import type { AckInfo } from '../console/IssueTracker';
 import { describeDraft } from '../labels';
 import type { Preset, PresetStep } from './schema';
 
-export type StepStatus = 'WAITING' | 'SENT' | 'OK' | 'FAILED' | 'SKIPPED' | 'CANCELLED';
+export type StepStatus = 'WAITING' | 'SENT' | 'OK' | 'FAILED' | 'SKIPPED' | 'CANCELLING' | 'CANCEL_FAILED' | 'CANCELLED';
+
+export const NEWER_COMMAND_REASON = '새 명령 있음, 건너뜀';
+
+/**
+ * Parties whose current command was issued by someone else after the preset started. Sending a late
+ * step to them would override that newer command (latest wins), so the runner skips the step.
+ * `current` is the party's current command (slot top); `ownIds` are the commands this run issued.
+ */
+export function partiesWithNewerForeignCommand(
+  partyIds: readonly string[],
+  current: (partyId: string) => { id: string; seq: number } | null | undefined,
+  ownIds: ReadonlySet<string>,
+  baselineSeq: number,
+): string[] {
+  return partyIds.filter((id) => {
+    const c = current(id);
+    return !!c && c.seq > baselineSeq && !ownIds.has(c.id);
+  });
+}
 
 export interface StepResult {
   index: number;
@@ -29,7 +48,12 @@ export interface PresetRun {
 export interface RunnerDeps {
   getParties(): Party[];
   issue(d: ManualDraft, onAck: (ack: AckInfo) => void): string;
-  cancel(commandId: string): string;
+  /** Sends command.cancel; onAck reports whether the server accepted it. */
+  cancel(commandId: string, onAck: (ack: AckInfo) => void): string;
+  /** Current command (top of the slot) of a party; with latestSeq it enables the newer-command guard. */
+  currentCommand?(partyId: string): { id: string; seq: number } | null;
+  /** Highest command seq known now (the baseline taken when a preset starts). */
+  latestSeq?(): number;
   /** True when the command is still live (not already cancelled), so a preset cancel skips dead ones. */
   isCancellable?(commandId: string): boolean;
   /** Gap between two sends. The server allows commanderRatePerSec; the default stays under it with margin. */
@@ -61,6 +85,8 @@ export class PresetRunner {
   private readonly setT: (fn: () => void, ms: number) => unknown;
   private readonly clearT: (h: unknown) => void;
   private readonly now: () => number;
+  /** Highest command seq when each run started: later commands of other issuers are "newer". */
+  private readonly baseline = new Map<number, number>();
   /** Steps of each run, by run id (kept to retry). */
   private readonly stepsOf = new Map<number, PresetStep[]>();
 
@@ -81,7 +107,12 @@ export class PresetRunner {
     };
     this.runs = [...this.runs, run].slice(-MAX_RUNS);
     this.stepsOf.set(run.id, preset.steps);
-    for (const key of [...this.stepsOf.keys()]) if (!this.runs.some((r) => r.id === key)) this.stepsOf.delete(key);
+    this.baseline.set(run.id, this.d.latestSeq?.() ?? Infinity);
+    for (const key of [...this.stepsOf.keys()]) {
+      if (this.runs.some((r) => r.id === key)) continue;
+      this.stepsOf.delete(key);
+      this.baseline.delete(key);
+    }
     preset.steps.forEach((step, index) => this.queue.push({ run, index, kind: 'issue', step }));
     this.changed();
     this.pump();
@@ -134,11 +165,21 @@ export class PresetRunner {
     this.pump();
   }
 
+  /** Re-sends the cancel of steps whose cancel failed. */
+  retryCancel(runId: number): void {
+    const run = this.runs.find((r) => r.id === runId);
+    if (!run || !run.cancelled) return;
+    for (const r of run.steps) if (r.status === 'CANCEL_FAILED' && r.commandId) this.enqueueCancel(run, r);
+    this.changed();
+    this.pump();
+  }
+
   private enqueueCancel(run: PresetRun, r: StepResult): void {
     if (this.d.isCancellable && !this.d.isCancellable(r.commandId!)) {
-      this.setStep(run, r.index, { status: 'CANCELLED' });
+      this.setStep(run, r.index, { status: 'CANCELLED', reason: undefined });
       return;
     }
+    this.setStep(run, r.index, { status: 'CANCELLING', reason: undefined });
     this.queue.push({ run, index: r.index, kind: 'cancel', commandId: r.commandId! });
   }
 
@@ -182,8 +223,8 @@ export class PresetRunner {
     if (!task) return;
     if (task.kind === 'cancel') {
       this.lastSendAt = this.now();
-      this.d.cancel(task.commandId);
-      this.setStep(task.run, task.index, { status: 'CANCELLED' });
+      // The state is decided by the cancel ack, not by the request leaving.
+      this.d.cancel(task.commandId, (ack) => this.onCancelAck(task.run, task.index, ack));
     } else {
       const sent = this.sendStep(task.run, task.index, task.step);
       if (sent) this.lastSendAt = this.now();
@@ -209,6 +250,14 @@ export class PresetRunner {
       }
       target = { kind: 'PARTIES', partyIds: found };
     }
+    const partyIds = target.kind === 'ALL' ? parties.map((p) => p.id) : target.partyIds;
+    const newer = this.d.currentCommand
+      ? partiesWithNewerForeignCommand(partyIds, this.d.currentCommand, ownCommandIds(run), this.baseline.get(run.id) ?? Infinity)
+      : [];
+    if (newer.length > 0) {
+      this.setStep(run, index, { status: 'SKIPPED', reason: NEWER_COMMAND_REASON });
+      return false;
+    }
     const support = (step.supportParties ?? []).flatMap((n) => (byNumber.has(n) ? [byNumber.get(n)!.id] : []));
     const draft: ManualDraft = {
       target,
@@ -221,6 +270,12 @@ export class PresetRunner {
     return true;
   }
 
+  private onCancelAck(run: PresetRun, index: number, ack: AckInfo): void {
+    if (ack.error) this.setStep(run, index, { status: 'CANCEL_FAILED', reason: ack.error });
+    else this.setStep(run, index, { status: 'CANCELLED', reason: undefined });
+    this.changed();
+  }
+
   private onAck(run: PresetRun, index: number, ack: AckInfo): void {
     if (ack.error) this.setStep(run, index, { status: run.cancelled ? 'CANCELLED' : 'FAILED', reason: ack.error });
     else {
@@ -231,6 +286,10 @@ export class PresetRunner {
     this.changed();
     this.pump();
   }
+}
+
+function ownCommandIds(run: PresetRun): Set<string> {
+  return new Set(run.steps.flatMap((s) => (s.commandId ? [s.commandId] : [])));
 }
 
 function previewLabel(step: PresetStep, parties: Party[]): string {

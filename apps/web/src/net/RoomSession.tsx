@@ -3,6 +3,7 @@ import type { PartyId, Role } from '@winds/protocol';
 import { wsUrl } from '../config';
 import { getRoom } from './api';
 import { useRoomStore } from '../state/roomStore';
+import { startHistoryRecorder } from '../member/history/recorder';
 import { RoomClient } from './RoomClient';
 import { getClientId, loadNickname, loadPartyChoice, savePartyChoice } from './session';
 
@@ -69,8 +70,11 @@ export function RoomSession({ code, role, token, children }: Props) {
         client.selectParty(partyId);
       },
     });
+    // Local command history for every role; started after attach so a snapshot already in the store is recorded.
+    const stopRecorder = startHistoryRecorder();
     client.start();
     return () => {
+      stopRecorder();
       unsub();
       client.stop();
       useRoomStore.getState().reset();

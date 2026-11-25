@@ -9,11 +9,21 @@ import { AckToasts, ErrorToast } from '../commander/console/AckPanel';
 import { useWakeLock, vibrate } from './device';
 import styles from './remote.module.css';
 
+const CLOSE_LABEL: Partial<Record<string, string>> = {
+  UNAUTHORIZED: '리모컨 링크가 올바르지 않거나 만료되었습니다',
+  ROOM_FULL: '방이 가득 찼습니다',
+  ROOM_NOT_FOUND: '방을 찾을 수 없습니다',
+};
+function statusText(connection: keyof typeof CONNECTION_LABEL, closeReason: string | null): string {
+  return (connection === 'CLOSED' && closeReason && CLOSE_LABEL[closeReason]) || CONNECTION_LABEL[connection];
+}
+
 /** Phone remote for the main commander: one-handed target -> action -> location -> publish, plus a big "직전 취소". Reuses the console controller and panel reducer unchanged. */
 export function RemoteConsole({ code }: { code: string }) {
   const c = useConsole();
   const parties = useRoomStore((s) => s.parties);
   const connection = useRoomStore((s) => s.connection);
+  const closeReason = useRoomStore((s) => s.closeReason);
   const hasSnapshot = useRoomStore((s) => s.hasSnapshot);
   const slots = useRoomStore((s) => s.slots);
   const commands = useRoomStore((s) => s.commands);
@@ -56,7 +66,7 @@ export function RemoteConsole({ code }: { code: string }) {
   return (
     <div className={styles.root} ref={rootRef}>
       <div className={`${styles.banner} ${tone}`} role="status" aria-live="polite" data-testid="remote-status">
-        {CONNECTION_LABEL[connection]}
+        {statusText(connection, closeReason)}
         <div className={styles.role}>
           휴대폰 리모컨 · 서브오더 권한 · 방 <span data-testid="room-code">{code}</span>
         </div>
@@ -93,6 +103,7 @@ export function RemoteConsole({ code }: { code: string }) {
       </ul>
 
       <div className={styles.panel} ref={panelRef} data-testid="remote-panel">
+        <div className={styles.panelScroll}>
         <div className={styles.group} role="group" aria-label="대상">
           <button type="button" className={styles.btn} aria-pressed={panel.all} disabled={!live} onClick={() => dispatch({ type: 'toggleAll' })} data-testid="remote-target-all">
             전체
@@ -143,6 +154,7 @@ export function RemoteConsole({ code }: { code: string }) {
               {l.label}
             </button>
           ))}
+        </div>
         </div>
         <div className={styles.actions}>
           <button type="button" className={`${styles.btn} ${styles.publish}`} disabled={!live || !draft} onClick={publish} data-testid="remote-publish">

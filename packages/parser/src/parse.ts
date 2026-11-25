@@ -101,6 +101,8 @@ interface DictExpr {
   kind: DictKind;
   value: string;
   weak: boolean;
+  /** 접속형 행동 표현("막고", "모이고"): 뒤 절이 이어질 때만 명령이다 */
+  conn: boolean;
 }
 
 interface CompiledDict {
@@ -114,6 +116,8 @@ const ACTION_ORDER: Action[] = ['GATHER', 'MOVE', 'ATTACK', 'DEFEND', 'RETREAT',
 /** 단독 발화일 때만 취소로 인정하는 표현 */
 const GENERIC_CANCEL = new Set(['취소해', '명령취소']);
 
+const isConnective = (expr: string) => expr.length >= 2 && expr.endsWith('고');
+
 const dictCache = new WeakMap<Dictionary, CompiledDict>();
 
 function compileDict(d: Dictionary): CompiledDict {
@@ -124,24 +128,24 @@ function compileDict(d: Dictionary): CompiledDict {
     for (const e of d.actions[a]) {
       const expr = compactExpression(e);
       if (!expr) continue;
-      exprs.push({ expr, kind: 'action', value: a, weak: WEAK_ACTION_EXPRESSIONS.has(expr) });
+      exprs.push({ expr, kind: 'action', value: a, weak: WEAK_ACTION_EXPRESSIONS.has(expr), conn: isConnective(expr) });
     }
   }
   for (const e of d.targetAll) {
     const expr = compactExpression(e);
-    if (expr) exprs.push({ expr, kind: 'all', value: 'ALL', weak: false });
+    if (expr) exprs.push({ expr, kind: 'all', value: 'ALL', weak: false, conn: false });
   }
   const locationLabel = new Map<string, string>();
   for (const l of d.locations) {
     locationLabel.set(l.id, l.label);
     for (const e of [l.label, ...l.aliases]) {
       const expr = compactExpression(e);
-      if (expr) exprs.push({ expr, kind: 'location', value: l.id, weak: false });
+      if (expr) exprs.push({ expr, kind: 'location', value: l.id, weak: false, conn: false });
     }
   }
   for (const e of d.correctionMarkers) {
     const expr = compactExpression(e);
-    if (expr) exprs.push({ expr, kind: 'marker', value: expr, weak: false });
+    if (expr) exprs.push({ expr, kind: 'marker', value: expr, weak: false, conn: false });
   }
   const compiled: CompiledDict = {
     exprs,
@@ -188,6 +192,7 @@ interface Mention {
   text: string;
   value: string; // partyId | 'ALL' | Action | locationId | marker
   weak: boolean;
+  conn?: boolean;
   label?: string;
   /** 파티 뒤에 한테/에게/쪽으로가 붙은 경우: 행동 주체가 아니라 도착지일 수 있다 */
   dest?: boolean;
@@ -199,6 +204,7 @@ interface Cand {
   ce: number;
   value: string;
   weak: boolean;
+  conn?: boolean;
   prio: number;
 }
 
@@ -256,7 +262,7 @@ function collectMentions(t: string, parties: readonly Party[], cd: CompiledDict,
       let prio = PRIO[e.kind];
       // 파티 이름과 행동 표현이 같을 때("수비"): 뒤에 "해/하"가 오면 행동으로 본다
       if (e.kind === 'action' && /^[해하]/.test(c.slice(i + e.expr.length))) prio = -1;
-      push({ kind: e.kind, cs: i, ce: i + e.expr.length, value: e.value, weak: e.weak, prio }, e.expr.length);
+      push({ kind: e.kind, cs: i, ce: i + e.expr.length, value: e.value, weak: e.weak, conn: e.conn, prio }, e.expr.length);
     }
   }
 
@@ -325,6 +331,7 @@ function collectMentions(t: string, parties: readonly Party[], cd: CompiledDict,
       text: t.slice(start, end),
       value: x.value,
       weak: x.weak,
+      conn: x.conn,
       label: x.kind === 'location' ? cd.locationLabel.get(x.value) : undefined,
       dest: x.kind === 'party' && /^(?:한테|에게|쪽으로)/.test(c.slice(x.ce)),
     };
@@ -417,6 +424,8 @@ interface Built {
   supportPartyIds?: PartyId[];
   conflict: boolean;
   weak: boolean;
+  /** 행동이 접속형("막고")으로 끝난다 */
+  connective: boolean;
   filled: boolean;
   reordered: boolean;
   /** 전체와 파티가 함께 나왔거나 파티가 도착지 표현이라 대상이 불확실하다 */
@@ -507,6 +516,7 @@ function buildClause(cl: Clause): Built {
     supportPartyIds: supportIds,
     conflict: conflictA || conflictL,
     weak,
+    connective: !!actionMs[actionMs.length - 1]?.conn,
     filled,
     reordered: cl.reordered,
     mixed,
@@ -533,6 +543,8 @@ function tryCorrect(
   after: Mention[],
   markers: Mention[],
   strongMarker: boolean,
+  softCap: boolean,
+  exclude?: PartyId[],
 ): ParseResult | 'none' | { unknown: string } {
   const last = ctx.lastVoiceCommand as NonNullable<ParseContext['lastVoiceCommand']>;
   const aClauses = splitClauses(after);
@@ -540,6 +552,11 @@ function tryCorrect(
   if (!first) return 'none';
   const b = buildClause(first);
   if (b.unknown) return { unknown: b.unknown };
+  if (exclude && (!b.target || b.target.kind === 'ALL')) {
+    const rest = ctx.parties.map((p) => p.id).filter((id) => !exclude.includes(id));
+    if (!rest.length) return 'none';
+    b.target = { kind: 'PARTIES', partyIds: rest };
+  }
   const patch: Partial<CommandDraft> = {};
   if (b.target) patch.target = b.target;
   if (b.action && !b.filled) patch.action = b.action;
@@ -562,7 +579,15 @@ function tryCorrect(
       verified = checks.length > 0 && checks.every(Boolean);
     }
   }
-  const high = verified && aClauses.length === 1 && !b.conflict && !(patch.action && b.weak);
+  // 본 발행(issue)과 같은 상한: 제외·붙여 쓴 숫자·문맥 표현(softCap), 전체·파티 혼합, 접속형으로 끝나는 행동
+  const high =
+    verified &&
+    aClauses.length === 1 &&
+    !b.conflict &&
+    !(patch.action && b.weak) &&
+    !softCap &&
+    !b.mixed &&
+    !(patch.action && b.connective);
   const evidence = [...markers.map((m) => toMatch(m, 'correction')), ...b.evidence].sort((x, y) => x.start - y.start);
   return {
     kind: 'CORRECT',
@@ -589,6 +614,11 @@ export function parse(text: string, ctx: ParseContext): ParseResult[] {
   }
 
   const all = collectMentions(t, ctx.parties, cd, d);
+
+  // 접속형 뒤에 "있-"+서술 어미("막고 있네요")는 진행 중인 상황 보고다
+  for (const m of all) {
+    if (m.conn && PROGRESSIVE.test(t.slice(m.end).replace(/ /g, ''))) return [{ kind: 'NONE', reason: '진행형 보고' }];
+  }
 
   // 취소: 긴 표현부터. "취소해"·"명령 취소"는 단독 발화일 때만, 나머지는 같이 말한 대상·행동이 직전 명령과 같을 때만 인정한다.
   {
@@ -627,6 +657,27 @@ export function parse(text: string, ctx: ParseContext): ParseResult[] {
     }
   }
 
+  // 띄어 쓴 한/두/세/네 파티는 개수 표현이라 어느 파티인지 모른다
+  // ("두 파티 쳐"처럼 단순한 번호 표현은 그대로 둔다. "…만"이거나 전체 표현이 함께 나올 때만)
+  let textCap = false;
+  if (
+    /(?:^|\s)(?:한|두|세|네)\s+(?:파티|팟)/u.test(text.normalize('NFKC')) &&
+    (/(?:한|두|세|네)\s+(?:파티|팟)\s*만/u.test(text.normalize('NFKC')) || all.some((m) => m.kind === 'all'))
+  )
+    textCap = true;
+
+  // 일이파티처럼 숫자 말을 붙여 쓴 것은 1·2파티로 읽지만 추측이다
+  if (hasAdjacentNumberRun(text, d)) textCap = true;
+
+  // 문맥 표현·장소 지시어: 어절 경계로 읽고, 반복어는 슬롯 없이 말만 길면 인정하지 않는다
+  const anaphora = ANAPHORA.test(t);
+  const repeat = REPEAT_WORDS.test(t) && repeatIsShort(t, all);
+  const deictic = DEICTIC.test(t);
+
+  // "1파티 빼고", "제외": 파티 목록을 알면 나머지 파티를 대상으로 하되 후보로만 둔다. 제외 표현은 자동 발행하지 않는다.
+  const ex = findExclusion(t);
+  if (ex) textCap = true;
+
   const markers = all.filter((m) => m.kind === 'marker');
   let body = all.filter((m) => m.kind !== 'marker');
   let capMedium = false;
@@ -640,7 +691,14 @@ export function parse(text: string, ctx: ParseContext): ParseResult[] {
       const lv = ctx.lastVoiceCommand;
       if (lv && ctx.now - lv.issuedAt <= LIMITS.correctionWindowMs) {
         const strong = markers.some((m) => m.value !== '아니');
-        const r = tryCorrect(ctx, before, after, markers, strong);
+        let cAfter = after;
+        let cExclude: PartyId[] | undefined;
+        if (ex) {
+          const ar = applyExclusion(after, ex, ctx.parties);
+          cAfter = ar.body;
+          cExclude = ar.exclude;
+        }
+        const r = tryCorrect(ctx, before, cAfter, markers, strong, textCap || anaphora || repeat || deictic, cExclude);
         if (typeof r === 'object' && 'kind' in r) return [r];
         if (typeof r === 'object' && 'unknown' in r)
           return [{ kind: 'NONE', reason: `방에 없는 파티: ${r.unknown}` }];
@@ -655,52 +713,44 @@ export function parse(text: string, ctx: ParseContext): ParseResult[] {
     }
   }
 
-  // 띄어 쓴 한/두/세/네 파티는 개수 표현이라 어느 파티인지 모른다
-  // ("두 파티 쳐"처럼 단순한 번호 표현은 그대로 둔다. "…만"이거나 전체 표현이 함께 나올 때만)
-  if (
-    /(?:^|\s)(?:한|두|세|네)\s+(?:파티|팟)/u.test(text.normalize('NFKC')) &&
-    (/(?:한|두|세|네)\s+(?:파티|팟)\s*만/u.test(text.normalize('NFKC')) || all.some((m) => m.kind === 'all'))
-  )
-    capMedium = true;
-
-  // 일이파티처럼 숫자 말을 붙여 쓴 것은 1·2파티로 읽지만 추측이다
-  if (hasAdjacentNumberRun(text, d)) capMedium = true;
-
   // 상대 상황을 말하는 혼잣말 ("상대 공격 들어오네요")은 명령이 아니다
   if (body.some((m) => m.kind === 'action') && !body.some(isTarget) && isEnemyNarration(t)) return [{ kind: 'NONE', reason: '상대 상황 서술' }];
 
-  // "1파티 빼고", "제외": 파티 목록을 알면 나머지 파티를 대상으로 하되 후보로만 둔다. 제외 표현은 자동 발행하지 않는다.
   let exclude: PartyId[] | undefined;
-  const ex = findExclusion(t);
   if (ex) {
-    capMedium = true;
     const r = applyExclusion(body, ex, ctx.parties);
     body = r.body;
     exclude = r.exclude;
   }
 
-  const compactText = t.replace(/ /g, '');
-  const res = issue(body, ctx, {
-    exclude,
-    anaphora: LOCATION_ANAPHORA.test(compactText),
-    repeat: REPEAT_WORDS.test(compactText),
-    context: pickContext(ctx),
-  });
-  if (!capMedium) return res;
+  const res = issue(body, ctx, { exclude, anaphora, repeat, deictic, context: pickContext(ctx) });
+  if (!capMedium && !textCap) return res;
   return res.map((r) => (r.kind === 'ISSUE' ? { ...r, confidence: 'MEDIUM' as const } : r));
 }
 
-/** 문맥에서 빠진 슬롯을 채운다. 채운 게 있으면 근거를 돌려준다 */
-function fillFromContext(b: Built, x: IssueExtras): ContextUse | undefined {
+/** 슬롯을 빌려 올 곳: 같은 문장의 앞 절(local) 또는 직전 발행 명령 */
+interface Source {
+  id?: CommandId;
+  target?: Target;
+  action: Action;
+  location?: Location;
+}
+
+/**
+ * 문맥에서 빠진 슬롯을 채운다. 같은 문장의 앞 절(`local`)을 직전 발행 명령보다 먼저 쓴다.
+ * 채운 게 있으면 근거를 돌려준다(앞 절만 쓴 경우 commandIds는 비어 있다).
+ */
+function fillFromContext(b: Built, x: IssueExtras, local?: Source): ContextUse | undefined {
   const filled: ContextUse['filled'] = [];
   const ids: CommandId[] = [];
-  const use = (c: ContextCommand) => {
-    if (!ids.includes(c.id)) ids.push(c.id);
+  const sources: Source[] = [...(local ? [local] : []), ...x.context];
+  const use = (c: Source) => {
+    if (c.id && !ids.includes(c.id)) ids.push(c.id);
   };
-  const recent = x.context[0];
+  const recent = sources[0];
   if (!recent) return undefined;
   if (!b.location && (x.anaphora || x.repeat)) {
-    const withLoc = x.context.find((c) => c.location);
+    const withLoc = sources.find((c) => c.location);
     if (withLoc?.location) {
       b.location = withLoc.location;
       filled.push('location');
@@ -715,7 +765,7 @@ function fillFromContext(b: Built, x: IssueExtras): ContextUse | undefined {
       use(recent);
     }
     // 같은 행동을 다시 하라는 뜻일 때만 대상도 가져온다 (다른 행동이면 누구에게인지 알 수 없다)
-    if (!b.target && b.action === recent.action) {
+    if (!b.target && recent.target && b.action === recent.action) {
       b.target = recent.target;
       filled.push('target');
       use(recent);
@@ -731,14 +781,35 @@ interface IssueExtras {
   /** 문맥 표현 사용 여부 */
   anaphora: boolean;
   repeat: boolean;
+  /** 사전에 없는 장소 지시어("저기", "여기")가 있다 */
+  deictic: boolean;
   context: ContextCommand[];
 }
 
 // ---------------------------------------------------------------------------
 // 제외 표현·문맥 표현·상대 서술
 
-const LOCATION_ANAPHORA = /거기|그쪽|그곳|그자리|그위치/;
-const REPEAT_WORDS = /다시|똑같이|똑같은|한번더|한번만더|또한번/;
+/** 어절 경계에서만 읽는다: "이거 기다려"의 "거기", "다 시작해"의 "다시"를 문맥 표현으로 보지 않는다. */
+const UNITS = SUFFIX_UNITS.map(esc).join('|');
+const wordRe = (body: string) => new RegExp(`(?:^|\\s)(?:${body})(?:${UNITS})*(?=\\s|$)`, 'u');
+const ANAPHORA = wordRe('거기|그쪽|그곳|그\\s?자리|그\\s?위치|아까\\s?(?:그\\s?)?(?:위치|자리)|아까처럼');
+const REPEAT_WORDS = wordRe('다시|똑같이|똑같은|한\\s?번\\s?더|한\\s?번만\\s?더|또\\s?한\\s?번');
+/** 사전에 없는 장소 지시어: 위치로 채울 수 없으니 위치가 비면 자동 발행하지 않는다 */
+const DEICTIC = wordRe('저기|여기|저쪽|이곳|저곳');
+/** 접속형 뒤 "있-"+서술 어미 */
+const PROGRESSIVE = /^있(?:네|습|어요|아요|죠|지요|는|군|구나|다|었|던)/;
+const REPEAT_FILLER = new RegExp(`^(?:${UNITS}|좀|더|한번|그대로)*$`, 'u');
+
+/** 반복어가 슬롯 없이 다른 말 사이에 낀 경우("아 다시 말할게요", "다들 한번 더 힘내요")를 걸러낸다. 남는 말이 조사·어미뿐일 때만 반복 명령이다. */
+function repeatIsShort(t: string, ms: Mention[]): boolean {
+  let s = t;
+  for (const m of [...ms].sort((a, b) => b.start - a.start)) s = s.slice(0, m.start) + ' ' + s.slice(m.end);
+  s = s.replace(REPEAT_WORDS, ' ');
+  return s
+    .split(/\s+/)
+    .filter(Boolean)
+    .every((tk) => REPEAT_FILLER.test(tk));
+}
 
 function pickContext(ctx: ParseContext): ContextCommand[] {
   return (ctx.options?.context ?? [])
@@ -793,14 +864,19 @@ function issue(ms: Mention[], ctx: ParseContext, x: IssueExtras): ParseResult[] 
   const clauses = splitClauses(ms);
   if (!clauses.length) clauses.push({ ms: [], borrowed: [], reordered: false });
 
-  for (const cl of clauses) {
+  let local: Source | undefined;
+  let droppedTarget = false;
+  for (const [ci, cl] of clauses.entries()) {
     const b = buildClause(cl);
     if (b.unknown) {
       unknownParty ??= b.unknown;
       continue;
     }
-    const used = useContext ? fillFromContext(b, x) : undefined;
+    const used = useContext ? fillFromContext(b, x, local) : undefined;
+    // 대상만 있고 행동이 없어 버려지는 절("1파티 모이고 2파티")은 후보로 남긴다: 이 문장의 다른 결과도 중간으로 낮춘다
+    if (!b.action && b.target) droppedTarget = true;
     if (!b.action) continue;
+    local = { target: b.target, action: b.action, location: b.location };
     if (x.exclude && (!b.target || b.target.kind === 'ALL')) {
       const rest = ctx.parties.map((p) => p.id).filter((id) => !x.exclude?.includes(id));
       if (!rest.length) continue;
@@ -814,8 +890,13 @@ function issue(ms: Mention[], ctx: ParseContext, x: IssueExtras): ParseResult[] 
     const supportMissing = b.action === 'SUPPORT' && !b.supportPartyIds && !b.location;
     // 문맥 표현("거기", "다시")이 있는데 채울 문맥이 없어 빠진 채 남았으면 자동 발행하지 않는다
     const unresolved = useContext && ((x.anaphora && !b.location) || (x.repeat && !b.target));
+    // 접속형("막고")은 뒤 절이 이어질 때만 명령이다. 장소 지시어는 위치가 비면 알 수 없다.
+    const connTail = b.connective && ci === clauses.length - 1;
+    const deicticMissing = x.deictic && !b.location;
     const high =
       !used &&
+      !connTail &&
+      !deicticMissing &&
       !unresolved &&
       !b.weak &&
       !b.conflict &&
@@ -833,10 +914,13 @@ function issue(ms: Mention[], ctx: ParseContext, x: IssueExtras): ParseResult[] 
       draft,
       confidence: high ? 'HIGH' : 'MEDIUM',
       evidence,
-      ...(used ? { context: used } : {}),
+      ...(used && used.commandIds.length ? { context: used } : {}),
     });
   }
-  if (results.length) return results;
+  if (results.length) {
+    if (!droppedTarget) return results;
+    return results.map((r) => (r.kind === 'ISSUE' ? { ...r, confidence: 'MEDIUM' as const } : r));
+  }
   if (unknownParty) return [{ kind: 'NONE', reason: `방에 없는 파티: ${unknownParty}` }];
   if (weakOnly) return [{ kind: 'NONE', reason: '모호한 행동 표현뿐 (대상·위치 없음)' }];
   return [{ kind: 'NONE', reason: '행동 없음' }];

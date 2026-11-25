@@ -140,6 +140,25 @@ describe('usePipWindow', () => {
   });
 });
 
+describe('usePipWindow unmount while opening', () => {
+  it('closes a window that arrives after the HUD unmounted', async () => {
+    const f = fakeHandle();
+    let resolve!: (h: PipWindowHandle) => void;
+    const adapter: PipAdapter = { isSupported: () => true, open: () => new Promise<PipWindowHandle>((r) => (resolve = r)) };
+    const { result, unmount } = renderHook(() => usePipWindow(adapter));
+    let p!: Promise<void>;
+    act(() => {
+      p = result.current.open();
+    });
+    unmount();
+    await act(async () => {
+      resolve(f.handle);
+      await p;
+    });
+    expect(f.handle.close).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe('CompactHud', () => {
   const parties = makeDefaultParties(4);
   const command: Command = {
@@ -153,7 +172,8 @@ describe('CompactHud', () => {
     issuedAt: 1000,
     repeatCount: 0,
   };
-  const base = { connection: 'CONNECTED' as const, hasSnapshot: true, parties, myParty: parties[2], command, now: 3000, fontScale: 1.3, onReturn: vi.fn() };
+  const presence = { total: 5, byParty: {}, unassigned: 0, commanderOnline: true, operatorsOnline: 0, sttState: 'LISTENING' as const };
+  const base = { connection: 'CONNECTED' as const, hasSnapshot: true, presence, parties, myParty: parties[2], command, now: 3000, fontScale: 1.3, onReturn: vi.fn() };
 
   it('shows my command, applies the font scale, returns on button', () => {
     const onReturn = vi.fn();
@@ -179,5 +199,16 @@ describe('CompactHud', () => {
     expect(screen.getByTestId('pip-unselected-hint')).toBeInTheDocument();
     fireEvent.click(screen.getByTestId('pip-enable-sound'));
     expect(unlock).toHaveBeenCalled();
+  });
+
+  it('shows the main-order / voice status like the status bar (FR-F10-6, FR-F05-11)', () => {
+    const { rerender } = render(<CompactHud {...base} />);
+    expect(screen.getByTestId('pip-status-commander')).toHaveTextContent('듣는 중');
+    rerender(<CompactHud {...base} presence={{ ...presence, commanderOnline: false }} />);
+    expect(screen.getByTestId('pip-status-commander')).toHaveTextContent('메인오더 연결 끊김');
+    rerender(<CompactHud {...base} presence={{ ...presence, sttState: 'OFF' }} />);
+    expect(screen.getByTestId('pip-status-commander')).toHaveTextContent('음성인식 꺼짐');
+    rerender(<CompactHud {...base} connection="RECONNECTING" presence={{ ...presence, commanderOnline: false }} />);
+    expect(screen.queryByTestId('pip-status-commander')).toBeNull();
   });
 });

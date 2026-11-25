@@ -13,6 +13,8 @@ const STATUS_MARK: Record<StepResult['status'], { text: string; color: string }>
   OK: { text: '✓', color: 'green' },
   FAILED: { text: '✕ 실패', color: 'red' },
   SKIPPED: { text: '건너뜀', color: 'yellow' },
+  CANCELLING: { text: '취소 중', color: 'orange' },
+  CANCEL_FAILED: { text: '✕ 취소 실패', color: 'red' },
   CANCELLED: { text: '취소됨', color: 'gray' },
 };
 
@@ -56,6 +58,7 @@ function RunStatus({ run, disabled }: { run: PresetRun; disabled?: boolean }) {
   const c = useConsole();
   const failed = run.steps.filter((s) => s.status === 'FAILED');
   const skipped = run.steps.filter((s) => s.status === 'SKIPPED');
+  const cancelFailed = run.steps.filter((s) => s.status === 'CANCEL_FAILED');
   const active = run.steps.some((s) => s.status === 'WAITING' || s.status === 'SENT');
   const hasIssued = run.steps.some((s) => s.status === 'OK' || s.status === 'SENT' || s.status === 'WAITING');
   return (
@@ -68,6 +71,11 @@ function RunStatus({ run, disabled }: { run: PresetRun; disabled?: boolean }) {
         {!run.cancelled && hasIssued && (
           <Button size="xs" color="red" variant="light" disabled={disabled} onClick={() => c.presets.cancelRun(run.id)} data-testid="preset-cancel">
             프리셋 취소
+          </Button>
+        )}
+        {cancelFailed.length > 0 && (
+          <Button size="xs" variant="light" color="red" disabled={disabled} onClick={() => c.presets.retryCancel(run.id)} data-testid="preset-cancel-retry">
+            취소 실패 {cancelFailed.length}건 재시도
           </Button>
         )}
         {failed.length > 0 && !run.cancelled && (
@@ -91,7 +99,7 @@ function RunStatus({ run, disabled }: { run: PresetRun; disabled?: boolean }) {
           return (
             <Badge key={s.index} color={m.color} variant="light" size="lg" style={{ textTransform: 'none' }} data-testid={`preset-step-${s.index}`} data-status={s.status}>
               {s.index + 1}. {s.label} {m.text}
-              {s.status === 'FAILED' && s.reason ? `: ${errorText(s.reason)}` : ''}
+              {(s.status === 'FAILED' || s.status === 'CANCEL_FAILED') && s.reason ? `: ${errorText(s.reason)}` : ''}
               {s.missing?.length ? ` (${s.missing.join('·')}파티 없음)` : ''}
             </Badge>
           );

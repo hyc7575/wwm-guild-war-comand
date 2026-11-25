@@ -17,7 +17,7 @@ import { useCardEffects } from './useCardEffects';
 import { useMemberHudModel } from './useMemberHudModel';
 import { useMediaQuery, useNow } from './useNow';
 import { useWakeLock } from './useWakeLock';
-import { PastHistory, useHistoryRecorder } from '../history';
+import { PastHistory } from '../history';
 import { CompactHud } from '../pip/CompactHud';
 import { usePipWindow } from '../pip/usePipWindow';
 import styles from './MemberHud.module.css';
@@ -45,7 +45,6 @@ function useAudioBlocked(enabled: boolean): boolean {
 
 export function MemberHud({ onChangeParty }: { onChangeParty(): void }) {
   const m = useMemberHudModel();
-  useHistoryRecorder();
   const roomCode = useRoomStore((s) => s.roomCode);
   const shareTranscript = useRoomStore((s) => s.settings.shareTranscript);
   const { settings, update } = useHudSettings();
@@ -124,6 +123,11 @@ export function MemberHud({ onChangeParty }: { onChangeParty(): void }) {
         )}
       </div>
 
+      {pip.error && !pip.win && (
+        <div className={styles.band} data-tone="warn" role="alert" data-testid="pip-error">
+          {pip.error === 'UNSUPPORTED' ? '이 브라우저는 작은 창을 지원하지 않습니다' : '작은 창을 열지 못했습니다'}
+        </div>
+      )}
       {pip.win && (
         <p className={styles.hint} data-testid="pip-active">
           작은 창으로 표시 중입니다.{' '}
@@ -137,6 +141,7 @@ export function MemberHud({ onChangeParty }: { onChangeParty(): void }) {
           <CompactHud
             connection={m.connection}
             hasSnapshot={m.hasSnapshot}
+            presence={m.presence}
             parties={m.parties}
             myParty={m.myParty}
             command={shownCommand}
@@ -197,7 +202,7 @@ export function MemberHud({ onChangeParty }: { onChangeParty(): void }) {
           <div className={styles.grid}>
             <PartyGrid
               parties={gridList}
-              columns={columns}
+              columns={unselected && wide ? undefined : columns}
               compactIdle={compactIdle}
               commandOf={m.commandOf}
               now={now}

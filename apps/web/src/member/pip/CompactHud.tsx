@@ -1,7 +1,8 @@
-import type { Command, Party } from '@winds/protocol';
+import type { Command, Party, Presence } from '@winds/protocol';
 import { HUD_CONNECTION_LABEL } from '../../shared/labels';
 import type { ConnectionStatus } from '../../net/RoomClient';
 import { AllLine } from '../hud/AllLine';
+import { commanderStatus } from '../hud/HudStatusBar';
 import { CommandCard, type RestoreKind } from '../hud/CommandCard';
 import styles from './CompactHud.module.css';
 
@@ -17,6 +18,7 @@ const TONE: Record<ConnectionStatus, 'ok' | 'warn' | 'danger'> = {
 export interface CompactHudProps {
   connection: ConnectionStatus;
   hasSnapshot: boolean;
+  presence: Presence;
   parties: Party[];
   myParty?: Party;
   command: Command | null;
@@ -40,6 +42,7 @@ export interface CompactHudProps {
 
 /** F05 small-window layout: status line + my party card (+ latest ALL line). Presentational. */
 export function CompactHud(p: CompactHudProps) {
+  const commander = commanderStatus(p.connection, p.hasSnapshot, p.presence);
   return (
     <div
       className={styles.root}
@@ -72,6 +75,11 @@ export function CompactHud(p: CompactHudProps) {
       {p.connection === 'REPLACED' && (
         <div className={styles.band} data-tone="danger" role="alert" data-testid="pip-banner-replaced">
           다른 탭에서 열렸습니다
+        </div>
+      )}
+      {commander && (
+        <div className={styles.cmdr} data-tone={commander.tone} role="status" data-testid="pip-status-commander">
+          {commander.text}
         </div>
       )}
       {p.audioBlocked && (

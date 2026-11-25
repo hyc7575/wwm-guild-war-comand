@@ -56,6 +56,13 @@
   flex-direction: column;
   gap: 8px;
   max-height: 62dvh;
+}
+/* Only the target/action/location groups scroll; the publish / cancel row below stays visible. */
+.panelScroll {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 0;
   overflow-y: auto;
 }
 .group {
@@ -88,6 +95,7 @@
 .actions {
   display: flex;
   gap: 8px;
+  flex: none;
 }
 .publish {
   flex: 1;

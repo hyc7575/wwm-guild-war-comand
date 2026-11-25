@@ -1,10 +1,11 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act } from '@testing-library/react';
 import { makeDefaultParties, type Command, type ServerMessage } from '@winds/protocol';
 import { useRoomStore } from '../../state/roomStore';
 import { HistoryStore } from './HistoryStore';
 import { startHistoryRecorder } from './recorder';
 import { memoryKv } from './testUtil';
+import type { Kv } from './HistoryStore';
 
 const NOW = Date.now();
 const cmd = (id: string, seq: number, over: Partial<Command> = {}): Command => ({
@@ -31,6 +32,12 @@ beforeEach(() => {
   saveT = false;
   useRoomStore.getState().attach('ABC234', 'MEMBER');
   stop = startHistoryRecorder({ history, saveTranscript: () => saveT });
+});
+const failingKv = (): Kv => ({
+  get: async () => { throw new Error('quota'); },
+  set: async () => { throw new Error('quota'); },
+  del: async () => undefined,
+  keys: async () => [],
 });
 afterEach(() => {
   stop();
@@ -68,5 +75,27 @@ describe('startHistoryRecorder', () => {
     const [room] = await history.listRooms();
     expect(room?.entries.map((x) => x.id)).toEqual(['c', 'a']);
     expect(room?.closed).toBe(true);
+  });
+
+  it('a recorder started after welcome still records the commands already in the snapshot', async () => {
+    stop();
+    send(welcome([cmd('a', 1), cmd('b', 2)]));
+    const late = new HistoryStore(memoryKv());
+    stop = startHistoryRecorder({ history: late, saveTranscript: () => false });
+    await flush();
+    const [room] = await late.listRooms();
+    expect(room?.entries.map((x) => x.id)).toEqual(['b', 'a']);
+  });
+
+  it('stops writing once the store is unavailable', async () => {
+    stop();
+    const bad = new HistoryStore(failingKv());
+    const spy = vi.spyOn(bad, 'record');
+    stop = startHistoryRecorder({ history: bad, saveTranscript: () => false });
+    send(welcome([cmd('a', 1)]));
+    await flush();
+    expect(bad.available).toBe(false);
+    send({ v: 1, type: 'event', seq: 11, kind: 'command.issued', payload: { command: cmd('b', 2), slots: { p1: [], p2: ['b'], p3: [], p4: [] } } });
+    expect(spy).toHaveBeenCalledTimes(1);
   });
 });

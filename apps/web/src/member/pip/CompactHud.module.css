@@ -58,6 +58,20 @@
   color: #fff;
   background: #b3261e;
 }
+.cmdr {
+  padding: 2px 8px;
+  font-size: 0.8rem;
+  color: var(--text-dim);
+}
+.cmdr[data-tone='warn'] {
+  padding: 4px 8px;
+  font-weight: 700;
+  color: #1a1400;
+  background: var(--warn);
+}
+.cmdr[data-tone='ok'] {
+  color: var(--ok);
+}
 .sound {
   width: 100%;
   min-height: 32px;

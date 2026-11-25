@@ -4,6 +4,9 @@
  * and only what follows the call word is read as the command.
  */
 
+import { compactExpression, DEFAULT_DICTIONARY, type Dictionary } from './dictionary';
+import { normalize } from './normalize';
+
 export const CALLWORD_MAX = 3;
 /** Fillers ("자", "에", "그") allowed before the call word. */
 export const CALLWORD_FILLER_MAX = 2;
@@ -53,19 +56,45 @@ export function sanitizeCallwordConfig(raw: unknown): CallwordConfig {
   };
 }
 
+const slotCache = new WeakMap<Dictionary, Set<string>>();
+function slotExpressions(d: Dictionary): Set<string> {
+  let set = slotCache.get(d);
+  if (!set) {
+    const all = [...Object.values(d.actions).flat(), ...d.targetAll, ...d.locations.flatMap((l) => [l.label, ...l.aliases])];
+    set = new Set(all.map(compactExpression).filter(Boolean));
+    slotCache.set(d, set);
+  }
+  return set;
+}
+
+/**
+ * A word before the call word is a command fragment, not a filler, when normalizing it yields a party number
+ * ("일파티", "삼 파티", "1파티") or it is itself a dictionary action, location or all-target word.
+ */
+function isCommandFragment(before: string[], d: Dictionary): boolean {
+  const norm = normalize(before.join(' '), d);
+  if (/\d/.test(norm)) return true;
+  const slots = slotExpressions(d);
+  return before.some((tk) => slots.has(compactExpression(tk)));
+}
+
 /**
  * Looks for a call word in the first CALLWORD_FILLER_MAX+1 words. Fillers containing a digit are not
  * fillers ("1파티 오더 ..." is a command about party 1, not a call). A glued form "오더1파티" is not matched.
  * Disabled config returns COMMAND with the whole text so callers can use one path.
  */
-export function extractCallword(text: string, cfg: CallwordConfig): CallwordResult {
+export function extractCallword(
+  text: string,
+  cfg: CallwordConfig,
+  dictionary: Dictionary = DEFAULT_DICTIONARY,
+): CallwordResult {
   const trimmed = text.trim();
   if (!cfg.enabled) return { kind: 'COMMAND', text: trimmed };
   const names = new Set(sanitizeCallwords([...cfg.words, ...cfg.aliases], CALLWORD_MAX + 10));
   if (names.size === 0) return { kind: 'NONE' };
   const tokens = trimmed.split(/\s+/).filter(Boolean);
   for (let i = 0; i <= CALLWORD_FILLER_MAX && i < tokens.length; i++) {
-    if (i > 0 && /\d/.test(tokens[i - 1]!)) return { kind: 'NONE' };
+    if (i > 0 && isCommandFragment(tokens.slice(0, i), dictionary)) return { kind: 'NONE' };
     if (names.has(clean(tokens[i]!))) {
       const rest = tokens.slice(i + 1).join(' ').replace(PUNCT, '');
       return rest ? { kind: 'COMMAND', text: rest } : { kind: 'CALL_ONLY' };

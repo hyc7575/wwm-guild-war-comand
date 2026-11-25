@@ -2,6 +2,7 @@ import { afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MantineProvider } from '@mantine/core';
 import { DictionaryEditor } from './DictionaryEditor';
+import { emptyAllianceDictionary } from './editing';
 import { DictionaryStore } from './store';
 
 beforeAll(() => {
@@ -105,5 +106,31 @@ describe('DictionaryEditor', () => {
     fireEvent.click(await screen.findByRole('option', { name: '공격', hidden: true }));
     fireEvent.click(tid('dict-suggest-add-찍어'));
     expect(store.getMerged().actions.ATTACK).toContain('찍어');
+  });
+
+  it('shows id clashes in the merge review and keeps both places', () => {
+    const store = new DictionaryStore(mem());
+    store.set({ ...emptyAllianceDictionary('나'), locations: [{ id: 'CUSTOM_1', label: '다리', aliases: [] }] });
+    mount(store);
+    openTab('내보내기·가져오기');
+    type('dict-import-text', JSON.stringify({ ...emptyAllianceDictionary('너'), locations: [{ id: 'CUSTOM_1', label: '성문', aliases: ['게이트'] }] }));
+    fireEvent.click(tid('dict-import-check'));
+    expect(tid('dict-merge-diff')).toHaveTextContent('다리');
+    expect(tid('dict-merge-diff')).toHaveTextContent('CUSTOM_2');
+    fireEvent.click(tid('dict-import-merge'));
+    expect(store.getAlliance().locations.map((l) => l.label)).toEqual(['다리', '성문']);
+  });
+
+  it('shows an error instead of throwing when the merged dictionary exceeds the limits', () => {
+    const store = new DictionaryStore(mem());
+    const many = (p: string) => Array.from({ length: 300 }, (_, i) => `${p}${i}`);
+    store.set({ ...emptyAllianceDictionary('나'), actions: { ...emptyAllianceDictionary().actions, ATTACK: many('가') } });
+    mount(store);
+    openTab('내보내기·가져오기');
+    type('dict-import-text', JSON.stringify({ ...emptyAllianceDictionary('너'), actions: { ...emptyAllianceDictionary().actions, ATTACK: many('나') } }));
+    fireEvent.click(tid('dict-import-check'));
+    fireEvent.click(tid('dict-import-merge'));
+    expect(tid('dict-import-apply-error')).toHaveTextContent('한도');
+    expect(store.getAlliance().actions.ATTACK).toHaveLength(300);
   });
 });

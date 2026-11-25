@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { makeDefaultParties } from '@winds/protocol';
 import type { AckInfo } from '../console/IssueTracker';
 import type { ManualDraft } from '../console/ConsoleController';
-import { PresetRunner } from './runner';
+import { NEWER_COMMAND_REASON, PresetRunner, partiesWithNewerForeignCommand } from './runner';
 import type { Preset } from './schema';
 
 function setup(partyCount = 3, intervalMs = 250) {
@@ -10,17 +10,21 @@ function setup(partyCount = 3, intervalMs = 250) {
   let parties = makeDefaultParties(partyCount);
   const timers: Array<{ at: number; fn: () => void }> = [];
   const issued: Array<{ at: number; d: ManualDraft; ack: (a: AckInfo) => void }> = [];
-  const cancelled: Array<{ at: number; id: string }> = [];
+  const cancelled: Array<{ at: number; id: string; ack: (a: AckInfo) => void }> = [];
+  const current = new Map<string, { id: string; seq: number }>();
+  let latest = 0;
   const runner = new PresetRunner({
     getParties: () => parties,
     issue: (d, ack) => {
       issued.push({ at: t, d, ack });
       return `r${issued.length}`;
     },
-    cancel: (id) => {
-      cancelled.push({ at: t, id });
+    cancel: (id, ack) => {
+      cancelled.push({ at: t, id, ack });
       return 'c';
     },
+    currentCommand: (pid) => current.get(pid) ?? null,
+    latestSeq: () => latest,
     intervalMs,
     now: () => t,
     setTimeout: (fn, ms) => {
@@ -42,7 +46,7 @@ function setup(partyCount = 3, intervalMs = 250) {
     }
     t = end;
   };
-  return { runner, issued, cancelled, advance, setParties: (n: number) => (parties = makeDefaultParties(n)) };
+  return { runner, issued, cancelled, advance, current, setLatest: (n: number) => (latest = n), setParties: (n: number) => (parties = makeDefaultParties(n)) };
 }
 
 const preset = (steps: Preset['steps']): Preset => ({ id: 'p', name: 'A작전', steps });
@@ -107,7 +111,47 @@ describe('PresetRunner', () => {
     advance(2000);
     expect(issued).toHaveLength(1);
     expect(cancelled.map((c) => c.id)).toEqual(['c1']);
-    expect(runner.latest()!.steps.map((s) => s.status)).toEqual(['CANCELLED', 'CANCELLED', 'CANCELLED']);
+    // Unsent steps are dropped at once; the issued one waits for the cancel ack.
+    expect(runner.latest()!.steps.map((s) => s.status)).toEqual(['CANCELLING', 'CANCELLED', 'CANCELLED']);
+    cancelled[0]!.ack({ at: 0 });
+    expect(runner.latest()!.steps[0]!.status).toBe('CANCELLED');
+  });
+
+  it('a failed cancel ack shows CANCEL_FAILED and can be retried', () => {
+    const { runner, issued, cancelled, advance } = setup(1);
+    const run = runner.start(preset([step([1])]));
+    advance(0);
+    issued[0]!.ack(ok('c1'));
+    runner.cancelRun(run.id);
+    advance(300);
+    cancelled[0]!.ack({ at: 0, error: 'RATE_LIMITED' });
+    expect(runner.latest()!.steps[0]).toMatchObject({ status: 'CANCEL_FAILED', reason: 'RATE_LIMITED' });
+    runner.retryCancel(run.id);
+    advance(300);
+    expect(cancelled).toHaveLength(2);
+    cancelled[1]!.ack({ at: 0 });
+    expect(runner.latest()!.steps[0]!.status).toBe('CANCELLED');
+  });
+
+  it('skips a late step when another issuer gave the party a newer command, but not for its own commands', () => {
+    const { runner, issued, advance, current, setLatest } = setup(2);
+    setLatest(5);
+    runner.start(preset([step([1]), step([2]), step([1], 'DEFEND')]));
+    advance(0);
+    issued[0]!.ack(ok('own1'));
+    current.set('p1', { id: 'own1', seq: 6 });
+    // Someone issues a new command to party 2 while the preset is running.
+    current.set('p2', { id: 'other', seq: 7 });
+    advance(1000);
+    const st = runner.latest()!.steps;
+    expect(st[1]).toMatchObject({ status: 'SKIPPED', reason: NEWER_COMMAND_REASON });
+    expect(st[2]!.status).toBe('SENT');
+    expect(issued).toHaveLength(2);
+  });
+
+  it('partiesWithNewerForeignCommand ignores old and own commands', () => {
+    const cur = (id: string) => ({ p1: { id: 'a', seq: 3 }, p2: { id: 'b', seq: 9 }, p3: { id: 'mine', seq: 10 } })[id as 'p1'] ?? null;
+    expect(partiesWithNewerForeignCommand(['p1', 'p2', 'p3', 'p4'], cur, new Set(['mine']), 5)).toEqual(['p2']);
   });
 
   it('cancels a step whose ack arrives after the run was cancelled', () => {

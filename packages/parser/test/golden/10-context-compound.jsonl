@@ -23,7 +23,7 @@
 {"text": "1파티 중앙으로 모이고 2파티는 후방", "note": "행동 생략: 앞 절의 행동을 이어 쓰되 후보", "expect": [{"kind": "ISSUE", "confidence": "HIGH", "target": [1], "action": "GATHER", "location": "CENTER"}, {"kind": "ISSUE", "confidence": "MEDIUM", "target": [2], "action": "GATHER", "location": "BACK"}]}
 {"text": "1파티 중앙으로 모여 그리고 2파티 후방", "expect": [{"kind": "ISSUE", "confidence": "HIGH", "target": [1], "action": "GATHER", "location": "CENTER"}, {"kind": "ISSUE", "confidence": "MEDIUM", "target": [2], "action": "GATHER", "location": "BACK"}]}
 {"text": "2파티 우측 막고 1파티 중앙으로 모여", "expect": [{"kind": "ISSUE", "confidence": "HIGH", "target": [2], "action": "DEFEND", "location": "RIGHT"}, {"kind": "ISSUE", "confidence": "HIGH", "target": [1], "action": "GATHER", "location": "CENTER"}]}
-{"text": "1파티는 앞에서 치고 2파티는 뒤에서 막고", "expect": [{"kind": "ISSUE", "confidence": "HIGH", "target": [1], "action": "ATTACK", "location": "FRONT"}, {"kind": "ISSUE", "confidence": "HIGH", "target": [2], "action": "DEFEND", "location": "BACK"}]}
+{"text": "1파티는 앞에서 치고 2파티는 뒤에서 막고", "note": "끝이 접속형(막고)이면 뒤 절이 없어 중간", "expect": [{"kind": "ISSUE", "confidence": "HIGH", "target": [1], "action": "ATTACK", "location": "FRONT"}, {"kind": "ISSUE", "confidence": "MEDIUM", "target": [2], "action": "DEFEND", "location": "BACK"}]}
 {"text": "1파티 중앙 2파티 후방", "note": "행동이 어디에도 없으면 버린다", "expect": [{"kind": "NONE"}]}
 // 제외 표현
 {"text": "다 모여 1파티 빼고", "expect": [{"kind": "ISSUE", "confidence": "MEDIUM", "target": [2, 3, 4, 5, 6], "action": "GATHER"}]}

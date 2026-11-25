@@ -50,6 +50,7 @@ export interface HistoryStoreOptions {
  */
 export class HistoryStore {
   available = true;
+  private readonly listeners = new Set<() => void>();
   private chain: Promise<unknown> = Promise.resolve();
   private readonly now: () => number;
   private readonly maxEntries: number;
@@ -147,7 +148,28 @@ export class HistoryStore {
   clearAll(): Promise<void> {
     return this.serial(async () => {
       for (const k of await this.kv.keys()) await this.kv.del(k);
-    }, undefined);
+    }, undefined).then(() => this.notify());
+  }
+
+  /** Removes every stored transcript (used when "인식 원문 저장" is turned off). */
+  stripTranscripts(): Promise<void> {
+    return this.serial(async () => {
+      for (const k of await this.kv.keys()) {
+        const h = await this.kv.get(k);
+        if (!h || !h.entries.some((e) => e.transcript !== undefined)) continue;
+        await this.kv.set(k, { ...h, entries: h.entries.map(({ transcript: _t, ...rest }) => rest) });
+      }
+    }, undefined).then(() => this.notify());
+  }
+
+  /** Called after clearAll / stripTranscripts so open lists can reload. */
+  subscribe(l: () => void): () => void {
+    this.listeners.add(l);
+    return () => void this.listeners.delete(l);
+  }
+
+  private notify(): void {
+    this.listeners.forEach((l) => l());
   }
 }
 

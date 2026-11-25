@@ -7,6 +7,8 @@ export interface MetricsSink {
   candidatePublished(): void;
   cancelled(origin: CancelOrigin): void;
   corrected(): void;
+  /** One command taken back by a preset cancel (counted apart so KR3's manual cancels are not inflated). */
+  presetCancelled(): void;
   /** Milliseconds from the end of the utterance to the server ack. */
   latency(ms: number): void;
 }
@@ -17,6 +19,8 @@ export interface MetricsSnapshot {
   candidatePublished: number;
   cancelledVoice: number;
   cancelledManual: number;
+  /** Commands cancelled by 프리셋 취소 (not part of cancelledManual). */
+  cancelledPreset: number;
   corrected: number;
   latencies: number[];
 }
@@ -29,6 +33,7 @@ export class SessionMetrics implements MetricsSink {
     candidatePublished: 0,
     cancelledVoice: 0,
     cancelledManual: 0,
+    cancelledPreset: 0,
     corrected: 0,
     latencies: [],
   };
@@ -45,6 +50,9 @@ export class SessionMetrics implements MetricsSink {
   cancelled(origin: CancelOrigin) {
     if (origin === 'VOICE') this.d.cancelledVoice++;
     else this.d.cancelledManual++;
+  }
+  presetCancelled() {
+    this.d.cancelledPreset++;
   }
   corrected() {
     this.d.corrected++;
@@ -71,6 +79,7 @@ export const NOOP_METRICS: MetricsSink = {
   candidateShown() {},
   candidatePublished() {},
   cancelled() {},
+  presetCancelled() {},
   corrected() {},
   latency() {},
 };

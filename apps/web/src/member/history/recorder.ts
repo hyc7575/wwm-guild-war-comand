@@ -1,4 +1,3 @@
-import { useEffect } from 'react';
 import type { Command } from '@winds/protocol';
 import { useRoomStore, type RoomData } from '../../state/roomStore';
 import { getHistoryStore, type HistoryStore } from './HistoryStore';
@@ -32,19 +31,31 @@ function idsOf(e: NonNullable<RoomData['lastEvent']>): string[] {
 /**
  * Outside-the-reducer subscription that mirrors commands into the local history.
  * Events carry a seq (duplicates skipped in the store); a snapshot (welcome / reconnect) tops up
- * commands we do not have and refreshes status of the ones we do.
+ * commands we do not have and refreshes status of the ones we do. A snapshot already in the store when
+ * the recorder starts is recorded right away. Writing stops once the store reports it is unavailable.
  */
 export function startHistoryRecorder(opts: {
   history?: HistoryStore;
   subscribe?: (l: (s: RoomData, prev: RoomData) => void) => () => void;
+  getState?: () => RoomData;
   saveTranscript?: () => boolean;
 } = {}): () => void {
   const history = opts.history ?? getHistoryStore();
   const subscribe = opts.subscribe ?? ((l) => useRoomStore.subscribe(l));
+  const getState = opts.getState ?? (() => useRoomStore.getState());
   const saveTranscript = opts.saveTranscript ?? (() => useHistorySettings.getState().saveTranscript);
 
+  const recordSnapshot = (s: RoomData) => {
+    if (!s.roomCode) return;
+    const entries = Object.values(s.commands).map((c) => toEntry(c, s.parties, saveTranscript()));
+    void history.record(s.roomCode, entries, { snapshotSeq: s.seq });
+  };
+
+  const initial = getState();
+  if (initial.roomCode && initial.hasSnapshot && history.available) recordSnapshot(initial);
+
   return subscribe((s, prev) => {
-    if (!s.roomCode || !s.hasSnapshot) return;
+    if (!s.roomCode || !s.hasSnapshot || !history.available) return;
     const withT = saveTranscript();
     if (s.lastEvent && s.lastEvent !== prev.lastEvent) {
       const entries = idsOf(s.lastEvent)
@@ -53,14 +64,8 @@ export function startHistoryRecorder(opts: {
         .map((c) => toEntry(c, s.parties, withT));
       void history.record(s.roomCode, entries, { eventSeq: s.lastEvent.seq });
     } else if (s.commands !== prev.commands || !prev.hasSnapshot || prev.roomCode !== s.roomCode) {
-      const entries = Object.values(s.commands).map((c) => toEntry(c, s.parties, withT));
-      void history.record(s.roomCode, entries, { snapshotSeq: s.seq });
+      recordSnapshot(s);
     }
     if (s.roomStatus === 'CLOSED' && prev.roomStatus !== 'CLOSED') void history.markClosed(s.roomCode);
   });
-}
-
-/** Mount once per room screen. */
-export function useHistoryRecorder(): void {
-  useEffect(() => startHistoryRecorder(), []);
 }

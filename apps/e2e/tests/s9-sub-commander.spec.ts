@@ -6,6 +6,7 @@ test('9. 서브오더: 링크로 접속해 명령을 내면 동맹원 HUD에 서
   const m1 = await joinMember(browser, cmd.code, 1);
 
   await cmd.page.getByTestId('invite-open').click();
+  await cmd.page.getByTestId('remote-reveal').click();
   const subUrl = await cmd.page.getByTestId('sub-link').inputValue();
   expect(subUrl).toMatch(new RegExp(`/s/${cmd.code}#.+`));
   await cmd.page.keyboard.press('Escape');

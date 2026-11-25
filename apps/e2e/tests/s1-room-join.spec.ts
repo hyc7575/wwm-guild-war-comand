@@ -12,6 +12,7 @@ test('1. 방 생성과 입장', async ({ browser }) => {
   await cmd.page.getByTestId('invite-open').click();
   await expect(cmd.page.getByTestId('invite-code')).toHaveText(cmd.code);
   await expect(cmd.page.getByTestId('invite-link')).toHaveValue(new RegExp(`/r/${cmd.code}$`));
+  await cmd.page.getByTestId('remote-reveal').click();
   await expect(cmd.page.getByTestId('operator-link')).toHaveValue(new RegExp(`/o/${cmd.code}#`));
   await cmd.page.keyboard.press('Escape');
 

@@ -1,3 +1,5 @@
+/** Server tokens are base64url (43 chars today). Any other fragment is not a remote link, so it must not pin the tab to remote mode. */
+const TOKEN_HASH = /^#[A-Za-z0-9_-]{16,128}$/;
 const key = (code: string) => `winds.remote.${code}`;
 
 /**
@@ -6,13 +8,14 @@ const key = (code: string) => `winds.remote.${code}`;
  * a per-tab flag keeps that tab in remote mode. No token is stored here.
  */
 export function isRemoteEntry(code: string, hash: string): boolean {
+  const tokenLike = TOKEN_HASH.test(hash);
   try {
-    if (hash.length > 1) {
+    if (tokenLike) {
       sessionStorage.setItem(key(code), '1');
       return true;
     }
     return sessionStorage.getItem(key(code)) === '1';
   } catch {
-    return hash.length > 1;
+    return tokenLike;
   }
 }

@@ -89,7 +89,14 @@ export class ConsoleController {
     this.presets = new PresetRunner({
       getParties: () => this.parties,
       issue: (d, onAck) => this.issueManual(d, 'MANUAL', onAck),
-      cancel: (id) => this.cancelCommand(id),
+      cancel: (id, onAck) => this.cancelCommand(id, { origin: 'PRESET', onAck }),
+      currentCommand: (partyId) => {
+        const st = this.o.store.getState();
+        const top = st.slots[partyId]?.at(-1);
+        const c = top !== undefined ? st.commands[top] : undefined;
+        return c ? { id: c.id, seq: c.seq } : null;
+      },
+      latestSeq: () => Object.values(this.o.store.getState().commands).reduce((m, c) => Math.max(m, c.seq), 0),
       isCancellable: (id) => {
         const c = this.o.store.getState().commands[id];
         return !!c && c.status !== 'CANCELLED' && c.status !== 'CORRECTED';
@@ -155,11 +162,15 @@ export class ConsoleController {
     return id;
   }
 
-  cancelCommand(commandId: string): string {
+  /** origin PRESET: counted as a preset cancel (on success), not as a manual cancel of the commander. */
+  cancelCommand(commandId: string, opts: { origin?: 'MANUAL' | 'PRESET'; onAck?: (ack: AckInfo) => void } = {}): string {
     const cmd = this.o.store.getState().commands[commandId];
     const label = cmd ? `${describeDraft(cmd, this.parties)} 취소` : '명령 취소';
-    this.metrics.cancelled('MANUAL');
+    const preset = opts.origin === 'PRESET';
+    if (!preset) this.metrics.cancelled('MANUAL');
     const reqId = this.tracker.request({ type: 'command.cancel', commandId }, label, (ack) => {
+      if (preset && !ack.error) this.metrics.presetCancelled();
+      opts.onAck?.(ack);
       // Success: the cancel event removes it from the slots. Failure: allow trying again.
       if (ack.error && this.inFlightCancels.get(commandId)?.reqId === reqId) this.inFlightCancels.delete(commandId);
     });

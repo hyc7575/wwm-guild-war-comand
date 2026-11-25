@@ -1,0 +1,28 @@
+// 검수 3회차 오발행 회귀. 모두 HIGH가 아니어야 하거나 NONE이어야 한다.
+// [1] 정정 분기에도 제외·붙여 쓴 숫자·문맥 표현·혼합 상한 적용
+{"text": "중앙 말고 1파티 빼고 다 우측으로 모여", "last":{"target":[1],"action":"GATHER","location":"CENTER","ageMs":5000}, "expect": [{"kind": "CORRECT", "confidence": "MEDIUM", "patch": {"target": [2,3,4,5,6], "action": "GATHER", "location": "RIGHT"}}]}
+{"text": "중앙 말고 아까 거기로 이동", "last":{"target":[1],"action":"GATHER","location":"CENTER","ageMs":5000}, "expect": [{"kind": "CORRECT", "confidence": "MEDIUM", "patch": {"action": "MOVE"}}]}
+{"text": "1파티 말고 일이파티 모여", "last":{"target":[1],"action":"GATHER","location":"CENTER","ageMs":5000}, "expect": [{"kind": "CORRECT", "confidence": "MEDIUM", "patch": {"target": [1,2], "action": "GATHER"}}]}
+{"text": "1파티 말고 다들 2파티 쪽으로 모여", "last":{"target":[1],"action":"GATHER","location":"CENTER","ageMs":5000}, "expect": [{"kind": "CORRECT", "confidence": "MEDIUM", "patch": {"target": "ALL", "action": "GATHER"}}]}
+// [2] 진행형 보고
+{"text": "1파티 잘 막고 있네요", "expect": [{"kind": "NONE"}]}
+{"text": "2파티 우측 막고 있죠", "expect": [{"kind": "NONE"}]}
+{"text": "3파티 빠지고 있습니다", "expect": [{"kind": "NONE"}]}
+{"text": "1파티 중앙 지키고 있어요", "expect": [{"kind": "NONE"}]}
+{"text": "1파티 우측 막고", "expect": [{"kind": "ISSUE", "confidence": "MEDIUM", "target": [1], "action": "DEFEND", "location": "RIGHT"}]}
+{"text": "1파티 중앙 모이고 2파티 우측 막아", "expect": [{"kind": "ISSUE", "confidence": "HIGH", "target": [1], "action": "GATHER", "location": "CENTER"}, {"kind": "ISSUE", "confidence": "HIGH", "target": [2], "action": "DEFEND", "location": "RIGHT"}]}
+// [4] 어절 경계
+{"text": "아 다시 말할게요", "context": [{"target": [1], "action": "MOVE", "location": "CENTER"}], "expect": [{"kind": "NONE"}]}
+{"text": "다시 확인해 보세요", "context": [{"target": [1], "action": "MOVE", "location": "CENTER"}], "expect": [{"kind": "NONE"}]}
+{"text": "다들 한번 더 힘내요", "context": [{"target": [1], "action": "MOVE", "location": "CENTER"}], "expect": [{"kind": "NONE"}]}
+{"text": "1파티 이거 기다려", "context": [{"target": [1], "action": "MOVE", "location": "CENTER"}], "expect": [{"kind": "ISSUE", "confidence": "HIGH", "target": [1], "action": "HOLD"}]}
+{"text": "1파티 다 시작해", "context": [{"target": [1], "action": "MOVE", "location": "CENTER"}], "expect": [{"kind": "NONE"}]}
+// [5] 사전에 없는 장소 지시어
+{"text": "다들 저기로 모여", "expect": [{"kind": "ISSUE", "confidence": "MEDIUM", "target": "ALL", "action": "GATHER"}]}
+{"text": "1파티 여기로", "expect": [{"kind": "NONE"}]}
+{"text": "2파티 저쪽으로 모여", "expect": [{"kind": "ISSUE", "confidence": "MEDIUM", "target": [2], "action": "GATHER"}]}
+// [6] 같은 문장 앞 절보다 문맥 우선
+{"text": "1파티 우측 공격하고 2파티도 똑같이", "context": [{"target": [1], "action": "DEFEND", "location": "LEFT"}], "expect": [{"kind": "ISSUE", "confidence": "HIGH", "target": [1], "action": "ATTACK", "location": "RIGHT"}, {"kind": "ISSUE", "confidence": "MEDIUM", "target": [2], "action": "ATTACK", "location": "RIGHT"}]}
+// [6] 버려지는 대상은 후보로 남긴다
+{"text": "1파티 중앙 모이고 2파티", "expect": [{"kind": "ISSUE", "confidence": "MEDIUM", "target": [1], "action": "GATHER", "location": "CENTER"}]}
+{"text": "다시 해", "context": [{"target": [1], "action": "MOVE", "location": "CENTER"}], "expect": [{"kind": "ISSUE", "confidence": "MEDIUM", "target": [1], "action": "MOVE", "location": "CENTER", "context": ["c1"]}]}
