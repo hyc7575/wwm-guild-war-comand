@@ -8,6 +8,7 @@ import { StatusBar } from '../shared/StatusBar';
 import { useRoomStore } from '../state/roomStore';
 import { Console } from './console/Console';
 import { ConsoleProvider } from './console/ConsoleProvider';
+import { ClosedSummary } from './summary/ClosedSummary';
 
 /** /c/:code: the F08 commander console. */
 export default function CommanderRoomPage() {
@@ -43,6 +44,7 @@ function CommanderBody({ code, operatorToken }: { code: string; operatorToken?: 
         </Text>
       )}
       <ConsoleProvider>
+        <ClosedSummary />
         <Console mode="commander" code={code} operatorToken={operatorToken} />
       </ConsoleProvider>
       <NoticeToast />

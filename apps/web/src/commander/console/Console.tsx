@@ -11,6 +11,7 @@ import { OperatorFeed } from './OperatorFeed';
 import { PartyCommands } from './PartyCommands';
 import { PartyEditor } from './PartyEditor';
 import { SettingsPanel } from './SettingsPanel';
+import { SummaryListButton } from '../summary/SummaryList';
 import { ShortcutLegend } from './ShortcutLegend';
 import { SttSlot } from './SttSlot';
 import { Subtitles, VoiceTestInput } from './Subtitles';
@@ -166,6 +167,7 @@ export function Console({ mode, code, operatorToken, sttSlot }: Props) {
           <Button variant="default" onClick={() => setEditor(true)} data-testid="party-editor-open">
             파티 편집
           </Button>
+          <SummaryListButton />
           <div style={{ flex: 1, minWidth: 260 }}>
             <SettingsPanel />
           </div>

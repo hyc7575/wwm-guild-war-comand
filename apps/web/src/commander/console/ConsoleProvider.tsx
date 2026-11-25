@@ -3,6 +3,9 @@ import type { CommandDraft } from '@winds/parser';
 import { useRoomSession } from '../../net/RoomSession';
 import { useRoomStore } from '../../state/roomStore';
 import type { Candidate, PipelineSnapshot, SubtitleLine } from '../pipeline/CommandPipeline';
+import { SessionMetrics } from '../metrics';
+import { SessionSummaryCollector, type CollectorSource } from '../summary/collector';
+import { defaultSummaryStore } from '../summary/store';
 import { ConsoleController, type ConsoleStore } from './ConsoleController';
 import type { TrackedRequest } from './IssueTracker';
 
@@ -24,12 +27,26 @@ export function ConsoleProvider({ children }: { children: ReactNode }) {
   const { client } = useRoomSession();
   const [controller, setController] = useState<ConsoleController | null>(null);
   useEffect(() => {
+    const metrics = new SessionMetrics();
+    const roomCode = useRoomStore.getState().roomCode;
+    const summary = roomCode
+      ? new SessionSummaryCollector({
+          roomCode,
+          source: useRoomStore as unknown as CollectorSource,
+          store: defaultSummaryStore(),
+          getMetrics: () => metrics.snapshot(),
+        })
+      : undefined;
     const c = new ConsoleController({
       client,
       store: useRoomStore as unknown as ConsoleStore,
+      metrics,
+      summary,
     });
+    void summary?.start();
     setController(c);
     return () => {
+      summary?.dispose();
       c.dispose();
       setController(null);
     };

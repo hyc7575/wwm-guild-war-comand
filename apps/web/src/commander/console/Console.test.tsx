@@ -62,14 +62,14 @@ afterEach(() => {
 const tid = (id: string) => screen.getByTestId(id);
 
 describe('Console (commander)', () => {
-  it('renders room info, party rows with current commands, STT placeholder and shortcut legend', () => {
+  it('renders room info, party rows with current commands, STT panel and shortcut legend', () => {
     mount();
     expect(tid('room-code')).toHaveTextContent('K7M2QX');
     expect(tid('member-count')).toHaveTextContent('7명');
     expect(tid('party-row-1')).toHaveTextContent('공격');
     expect(tid('party-row-2')).toHaveTextContent('—');
     expect(tid('party-row-3')).toHaveTextContent('방어');
-    expect(tid('stt-slot')).toHaveTextContent('음성인식 미연결');
+    expect(tid('stt-slot')).toContainElement(tid('stt-start'));
     expect(tid('shortcut-legend')).toHaveTextContent('직전 취소');
   });
 

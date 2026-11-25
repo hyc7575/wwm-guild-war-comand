@@ -4,6 +4,7 @@ import { Alert, Button, Group, NumberInput, Paper, Stack, TextInput, Title } fro
 import { LIMITS, type CreateRoomRequest } from '@winds/protocol';
 import { createRoom } from '../net/api';
 import { saveRoomTokens } from '../net/session';
+import { SummaryListButton, TempSummaryNotice } from './summary/SummaryList';
 import { loadLastConfig, saveLastConfig, type PartyDraft } from './lastConfig';
 
 const DEFAULT_COUNT = 5;
@@ -88,6 +89,7 @@ export default function CreateRoomPage() {
       <Title order={1} size="h2">
         방 만들기
       </Title>
+      <TempSummaryNotice />
       <NumberInput
         label="파티 수"
         min={LIMITS.minParties}
@@ -104,6 +106,7 @@ export default function CreateRoomPage() {
         <Button variant="default" onClick={loadPrevious} disabled={!last}>
           지난 구성 불러오기
         </Button>
+        <SummaryListButton />
       </Group>
       <Stack gap="xs">
         {drafts.map((d, i) => (

@@ -1,10 +1,11 @@
-import type { Action, Location, Party, RoomSettingsPatch, Target } from '@winds/protocol';
+import type { Action, Location, Party, RoomSettingsPatch, SttState, Target } from '@winds/protocol';
 import { DEFAULT_DICTIONARY, parse, type CommandDraft, type Dictionary } from '@winds/parser';
 import type { RequestInput, SendPayload, UnsentCommand } from '../../net/RoomClient';
 import type { AckRecord } from '../../state/roomReducer';
 import type { RoomStore } from '../../state/roomStore';
 import { describeDraft } from '../labels';
 import { SessionMetrics, type MetricsSink } from '../metrics';
+import type { SessionSummaryCollector } from '../summary/collector';
 import { CommandPipeline } from '../pipeline/CommandPipeline';
 import { IdbTuningLog, type TuningLog } from '../pipeline/tuningLog';
 import { IssueTracker, type AckInfo } from './IssueTracker';
@@ -28,6 +29,8 @@ export interface ConsoleOptions {
   /** Dictionary getter: the default one now, merged with the alliance dictionary (F09) later. */
   getDictionary?: () => Dictionary;
   now?: () => number;
+  /** F07 session summary collector (commander console only). */
+  summary?: SessionSummaryCollector;
 }
 
 export interface ManualDraft {
@@ -46,6 +49,7 @@ export class ConsoleController {
   readonly tracker: IssueTracker;
   readonly pipeline: CommandPipeline;
   readonly metrics: MetricsSink;
+  readonly summary: SessionSummaryCollector | undefined;
   private readonly getDictionary: () => Dictionary;
   private readonly now: () => number;
   private readonly inFlightCancels = new Set<string>();
@@ -56,6 +60,7 @@ export class ConsoleController {
     this.now = o.now ?? (() => Date.now());
     this.getDictionary = o.getDictionary ?? (() => DEFAULT_DICTIONARY);
     this.metrics = o.metrics ?? new SessionMetrics();
+    this.summary = o.summary;
     this.tracker = new IssueTracker({ client: o.client, now: this.now });
     this.pipeline = new CommandPipeline({
       request: (input, label, onAck) => this.tracker.request(input, label, onAck),
@@ -170,7 +175,14 @@ export class ConsoleController {
   }
 
   closeRoom(): string {
+    // FR-F07-8: save the final summary just before the close request leaves.
+    void this.summary?.finalize();
     return this.tracker.request({ type: 'room.close' }, '방 종료');
+  }
+
+  /** F02: tell the server the STT state (fire and forget; resent by the STT panel after reconnects). */
+  sendSttStatus(state: SttState): boolean {
+    return this.o.client.send({ type: 'stt.status', state });
   }
 
   // ---------- unsent (F10) ----------
