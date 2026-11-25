@@ -6,6 +6,7 @@ import { JoinPage } from './pages/JoinPage';
 // Mantine lives only in these lazy chunks (commander/operator).
 const Create = lazy(() => import('./commander').then((m) => ({ default: m.Create })));
 const CommanderRoom = lazy(() => import('./commander').then((m) => ({ default: m.CommanderRoom })));
+const Bench = lazy(() => import('./bench').then((m) => ({ default: m.BenchPage })));
 const Operator = lazy(() => import('./operator').then((m) => ({ default: m.Operator })));
 
 export function AppRoutes() {
@@ -17,6 +18,7 @@ export function AppRoutes() {
         <Route path="/create" element={<Create />} />
         <Route path="/c/:code" element={<CommanderRoom />} />
         <Route path="/o/:code" element={<Operator />} />
+        <Route path="/bench" element={<Bench />} />
         <Route path="*" element={<HomePage />} />
       </Routes>
     </Suspense>

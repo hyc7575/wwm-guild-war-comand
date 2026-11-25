@@ -7,3 +7,6 @@ models/
 coverage
 playwright-report
 test-results
+
+# STT 벤더 자산 (pnpm fetch:stt-wasm 로 받음)
+apps/web/public/vendor/
