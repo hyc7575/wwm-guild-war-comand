@@ -1,0 +1,63 @@
+// 행동·대상·위치·조사·지원 기본 명령
+{"text": "3파티 중앙으로 집결", "expect": [{"kind": "ISSUE", "confidence": "HIGH", "target": [3], "action": "GATHER", "location": "CENTER"}]}
+{"text": "1파티 모여", "expect": [{"kind": "ISSUE", "confidence": "HIGH", "target": [1], "action": "GATHER"}]}
+{"text": "전원 중앙으로 모이세요", "expect": [{"kind": "ISSUE", "confidence": "HIGH", "target": "ALL", "action": "GATHER", "location": "CENTER"}]}
+{"text": "다들 우측으로 이동", "expect": [{"kind": "ISSUE", "confidence": "HIGH", "target": "ALL", "action": "MOVE", "location": "RIGHT"}]}
+{"text": "2파티 왼쪽으로 넘어가", "expect": [{"kind": "ISSUE", "confidence": "HIGH", "target": [2], "action": "MOVE", "location": "LEFT"}]}
+{"text": "4파티 쳐", "expect": [{"kind": "ISSUE", "confidence": "HIGH", "target": [4], "action": "ATTACK"}]}
+{"text": "6파티 박아", "expect": [{"kind": "ISSUE", "confidence": "HIGH", "target": [6], "action": "ATTACK"}]}
+{"text": "5파티 들어가", "note": "들어가는 모호(F03 열린 질문)라 약한 표현으로 둔다", "expect": [{"kind": "ISSUE", "confidence": "MEDIUM", "target": [5], "action": "ATTACK"}]}
+{"text": "1파티 2파티 3파티 공격", "expect": [{"kind": "ISSUE", "confidence": "HIGH", "target": [1, 2, 3], "action": "ATTACK"}]}
+{"text": "3파티 우측 지켜", "expect": [{"kind": "ISSUE", "confidence": "HIGH", "target": [3], "action": "DEFEND", "location": "RIGHT"}]}
+{"text": "2파티 중앙 방어", "expect": [{"kind": "ISSUE", "confidence": "HIGH", "target": [2], "action": "DEFEND", "location": "CENTER"}]}
+{"text": "1파티 앞쪽 막아", "expect": [{"kind": "ISSUE", "confidence": "HIGH", "target": [1], "action": "DEFEND", "location": "FRONT"}]}
+{"text": "전체 후퇴", "expect": [{"kind": "ISSUE", "confidence": "HIGH", "target": "ALL", "action": "RETREAT"}]}
+{"text": "3파티 빠져", "expect": [{"kind": "ISSUE", "confidence": "HIGH", "target": [3], "action": "RETREAT"}]}
+{"text": "2파티 뒤쪽으로 빠지세요", "expect": [{"kind": "ISSUE", "confidence": "HIGH", "target": [2], "action": "RETREAT", "location": "BACK"}]}
+{"text": "1파티 대기", "expect": [{"kind": "ISSUE", "confidence": "HIGH", "target": [1], "action": "HOLD"}]}
+{"text": "4파티 멈춰", "expect": [{"kind": "ISSUE", "confidence": "HIGH", "target": [4], "action": "HOLD"}]}
+{"text": "전원 홀드", "expect": [{"kind": "ISSUE", "confidence": "HIGH", "target": "ALL", "action": "HOLD"}]}
+{"text": "다들 기다려", "expect": [{"kind": "ISSUE", "confidence": "HIGH", "target": "ALL", "action": "HOLD"}]}
+{"text": "3파티 스탑", "expect": [{"kind": "ISSUE", "confidence": "HIGH", "target": [3], "action": "HOLD"}]}
+{"text": "다 모여", "expect": [{"kind": "ISSUE", "confidence": "HIGH", "target": "ALL", "action": "GATHER"}]}
+{"text": "다 쳐", "expect": [{"kind": "ISSUE", "confidence": "HIGH", "target": "ALL", "action": "ATTACK"}]}
+{"text": "올파티 중앙 집결", "expect": [{"kind": "ISSUE", "confidence": "HIGH", "target": "ALL", "action": "GATHER", "location": "CENTER"}]}
+{"text": "모두 방어", "expect": [{"kind": "ISSUE", "confidence": "HIGH", "target": "ALL", "action": "DEFEND"}]}
+{"text": "전체 홀드", "expect": [{"kind": "ISSUE", "confidence": "HIGH", "target": "ALL", "action": "HOLD"}]}
+{"text": "3파티 중앙으로 가세요", "expect": [{"kind": "ISSUE", "confidence": "HIGH", "target": [3], "action": "MOVE", "location": "CENTER"}]}
+{"text": "3파티 중앙으로 가", "note": "단독 \"가\"는 약한 표현", "expect": [{"kind": "ISSUE", "confidence": "MEDIUM", "target": [3], "action": "MOVE", "location": "CENTER"}]}
+{"text": "3파티 이쪽으로 와", "note": "이쪽으로/와는 약한 표현", "expect": [{"kind": "ISSUE", "confidence": "MEDIUM", "target": [3], "action": "MOVE"}]}
+{"text": "1파티 대기 중앙", "expect": [{"kind": "ISSUE", "confidence": "HIGH", "target": [1], "action": "HOLD", "location": "CENTER"}]}
+{"text": "2파티 이쪽으로 모여", "note": "강한 행동이 있으면 약한 행동은 무시", "expect": [{"kind": "ISSUE", "confidence": "HIGH", "target": [2], "action": "GATHER"}]}
+{"text": "3파티 가운데 방어", "expect": [{"kind": "ISSUE", "confidence": "HIGH", "target": [3], "action": "DEFEND", "location": "CENTER"}]}
+{"text": "3파티 미드 방어", "expect": [{"kind": "ISSUE", "confidence": "HIGH", "target": [3], "action": "DEFEND", "location": "CENTER"}]}
+{"text": "전원 중간으로 모여", "expect": [{"kind": "ISSUE", "confidence": "HIGH", "target": "ALL", "action": "GATHER", "location": "CENTER"}]}
+{"text": "3파티 왼편으로 이동", "expect": [{"kind": "ISSUE", "confidence": "HIGH", "target": [3], "action": "MOVE", "location": "LEFT"}]}
+{"text": "3파티 오른편으로 이동", "expect": [{"kind": "ISSUE", "confidence": "HIGH", "target": [3], "action": "MOVE", "location": "RIGHT"}]}
+{"text": "3파티 전방 공격", "expect": [{"kind": "ISSUE", "confidence": "HIGH", "target": [3], "action": "ATTACK", "location": "FRONT"}]}
+{"text": "3파티 후방 방어", "expect": [{"kind": "ISSUE", "confidence": "HIGH", "target": [3], "action": "DEFEND", "location": "BACK"}]}
+{"text": "3파티는 좌로 이동", "expect": [{"kind": "ISSUE", "confidence": "HIGH", "target": [3], "action": "MOVE", "location": "LEFT"}]}
+{"text": "2파티 우로 가세요", "expect": [{"kind": "ISSUE", "confidence": "HIGH", "target": [2], "action": "MOVE", "location": "RIGHT"}]}
+{"text": "1파티 앞으로 가세요", "expect": [{"kind": "ISSUE", "confidence": "HIGH", "target": [1], "action": "MOVE", "location": "FRONT"}]}
+{"text": "1파티 뒤로 빠져", "note": "\"뒤로 빠져\"가 후퇴 표현이라 위치는 비운다", "expect": [{"kind": "ISSUE", "confidence": "HIGH", "target": [1], "action": "RETREAT"}]}
+{"text": "1파티 뒤쪽 지켜", "expect": [{"kind": "ISSUE", "confidence": "HIGH", "target": [1], "action": "DEFEND", "location": "BACK"}]}
+{"text": "1파티는 중앙으로 모이세요", "expect": [{"kind": "ISSUE", "confidence": "HIGH", "target": [1], "action": "GATHER", "location": "CENTER"}]}
+{"text": "3파티가 우측을 지켜", "expect": [{"kind": "ISSUE", "confidence": "HIGH", "target": [3], "action": "DEFEND", "location": "RIGHT"}]}
+{"text": "1파티 모여라", "expect": [{"kind": "ISSUE", "confidence": "HIGH", "target": [1], "action": "GATHER"}]}
+{"text": "2파티 집결하세요", "expect": [{"kind": "ISSUE", "confidence": "HIGH", "target": [2], "action": "GATHER"}]}
+{"text": "3파티 지켜주세요", "expect": [{"kind": "ISSUE", "confidence": "HIGH", "target": [3], "action": "DEFEND"}]}
+{"text": "전원 후퇴해", "expect": [{"kind": "ISSUE", "confidence": "HIGH", "target": "ALL", "action": "RETREAT"}]}
+{"text": "1파티 공격해", "expect": [{"kind": "ISSUE", "confidence": "HIGH", "target": [1], "action": "ATTACK"}]}
+{"text": "5파티 대기하세요", "expect": [{"kind": "ISSUE", "confidence": "HIGH", "target": [5], "action": "HOLD"}]}
+{"text": "4파티 이동하세요", "expect": [{"kind": "ISSUE", "confidence": "HIGH", "target": [4], "action": "MOVE"}]}
+{"text": "삼파티 우측으로 이동해", "expect": [{"kind": "ISSUE", "confidence": "HIGH", "target": [3], "action": "MOVE", "location": "RIGHT"}]}
+{"text": "1파티 중앙으로 모여 주세요", "expect": [{"kind": "ISSUE", "confidence": "HIGH", "target": [1], "action": "GATHER", "location": "CENTER"}]}
+{"text": "1파티 중앙으로 모여 줘", "expect": [{"kind": "ISSUE", "confidence": "HIGH", "target": [1], "action": "GATHER", "location": "CENTER"}]}
+{"text": "1파티 오른쪽으로 이동 이동", "expect": [{"kind": "ISSUE", "confidence": "HIGH", "target": [1], "action": "MOVE", "location": "RIGHT"}]}
+{"text": "2파티 1파티 도와줘", "expect": [{"kind": "ISSUE", "confidence": "HIGH", "target": [2], "action": "SUPPORT", "support": [1]}]}
+{"text": "3파티 2파티 도와주세요", "expect": [{"kind": "ISSUE", "confidence": "HIGH", "target": [3], "action": "SUPPORT", "support": [2]}]}
+{"text": "전원 1파티 지원", "expect": [{"kind": "ISSUE", "confidence": "HIGH", "target": "ALL", "action": "SUPPORT", "support": [1]}]}
+{"text": "4파티 1파티 2파티 지원", "expect": [{"kind": "ISSUE", "confidence": "HIGH", "target": [4], "action": "SUPPORT", "support": [1, 2]}]}
+{"text": "3파티 중앙 지원", "expect": [{"kind": "ISSUE", "confidence": "HIGH", "target": [3], "action": "SUPPORT", "location": "CENTER"}]}
+{"text": "1파티 지원", "note": "지원 대상이 없다", "expect": [{"kind": "ISSUE", "confidence": "MEDIUM", "target": [1], "action": "SUPPORT"}]}
+{"text": "1파티 지원 2파티", "note": "어순이 뒤바뀐 지원은 후보", "expect": [{"kind": "ISSUE", "confidence": "MEDIUM", "target": [1], "action": "SUPPORT", "support": [2]}]}

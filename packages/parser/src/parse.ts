@@ -1,0 +1,620 @@
+import {
+  LIMITS,
+  type Action,
+  type Command,
+  type CommandId,
+  type Location,
+  type Party,
+  type PartyId,
+  type Target,
+} from '@winds/protocol';
+import {
+  buildPartyLexicon,
+  compactExpression,
+  WEAK_ACTION_EXPRESSIONS,
+  type Dictionary,
+} from './dictionary';
+import { normalize } from './normalize';
+
+// ---------------------------------------------------------------------------
+// 공개 타입 (F03)
+
+export interface CommandDraft {
+  target: Target;
+  action: Action;
+  location?: Location;
+  supportPartyIds?: PartyId[];
+}
+
+export type MatchSlot = 'target' | 'action' | 'location' | 'support' | 'correction' | 'cancel';
+
+/**
+ * 판단 근거. `start`/`end`는 `normalize(text, dictionary)` 결과 문자열 기준 오프셋이고 `text`는 그 부분 문자열이다.
+ * `value`: target → partyId 또는 'ALL', action → Action, location → location id,
+ * support → partyId, correction → 정정어(정규형), cancel → 취소 표현(정규형).
+ */
+export interface Match {
+  slot: MatchSlot;
+  text: string;
+  start: number;
+  end: number;
+  value: string;
+}
+
+export interface ParseOptions {
+  /** Q1: 대상 없는 명령을 전체 대상 확신도 높음으로 본다 (방 설정 `targetlessAsAll`) */
+  targetlessAsAll?: boolean;
+}
+
+export interface ParseContext {
+  parties: Party[];
+  dictionary: Dictionary;
+  lastVoiceCommand?: { command: Command; issuedAt: number };
+  now: number;
+  options?: ParseOptions;
+}
+
+export type Confidence = 'HIGH' | 'MEDIUM';
+
+export type ParseResult =
+  | { kind: 'ISSUE'; draft: CommandDraft; confidence: Confidence; evidence: Match[] }
+  | {
+      kind: 'CORRECT';
+      correctsId: CommandId;
+      patch: Partial<CommandDraft>;
+      confidence: Confidence;
+      evidence: Match[];
+    }
+  | { kind: 'CANCEL'; commandId: CommandId; evidence: Match[] }
+  | { kind: 'NONE'; reason: string };
+
+// ---------------------------------------------------------------------------
+// 사전 컴파일 (사전 객체별 캐시)
+
+type DictKind = 'action' | 'all' | 'location' | 'marker';
+
+interface DictExpr {
+  expr: string;
+  kind: DictKind;
+  value: string;
+  weak: boolean;
+}
+
+interface CompiledDict {
+  exprs: DictExpr[];
+  cancel: string[];
+  locationLabel: Map<string, string>;
+}
+
+const ACTION_ORDER: Action[] = ['GATHER', 'MOVE', 'ATTACK', 'DEFEND', 'RETREAT', 'SUPPORT', 'HOLD'];
+
+const dictCache = new WeakMap<Dictionary, CompiledDict>();
+
+function compileDict(d: Dictionary): CompiledDict {
+  const hit = dictCache.get(d);
+  if (hit) return hit;
+  const exprs: DictExpr[] = [];
+  for (const a of ACTION_ORDER) {
+    for (const e of d.actions[a]) {
+      const expr = compactExpression(e);
+      if (!expr) continue;
+      exprs.push({ expr, kind: 'action', value: a, weak: WEAK_ACTION_EXPRESSIONS.has(expr) });
+    }
+  }
+  for (const e of d.targetAll) {
+    const expr = compactExpression(e);
+    if (expr) exprs.push({ expr, kind: 'all', value: 'ALL', weak: false });
+  }
+  const locationLabel = new Map<string, string>();
+  for (const l of d.locations) {
+    locationLabel.set(l.id, l.label);
+    for (const e of [l.label, ...l.aliases]) {
+      const expr = compactExpression(e);
+      if (expr) exprs.push({ expr, kind: 'location', value: l.id, weak: false });
+    }
+  }
+  for (const e of d.correctionMarkers) {
+    const expr = compactExpression(e);
+    if (expr) exprs.push({ expr, kind: 'marker', value: expr, weak: false });
+  }
+  const compiled: CompiledDict = {
+    exprs,
+    cancel: d.cancelPhrases.map(compactExpression).filter(Boolean),
+    locationLabel,
+  };
+  dictCache.set(d, compiled);
+  return compiled;
+}
+
+// ---------------------------------------------------------------------------
+// 경계 휴리스틱
+//
+// 길이 3 이상 표현: 어디서든 매칭 ("중앙으로모여"처럼 STT가 붙여 쓴 경우를 살린다).
+// 길이 2 표현: 뒤가 "조사·어미"로만 이어지다 어절이 끝나야 한다 ("공격력", "지원군", "전체적으로"를 걸러낸다).
+// 길이 1 표현(다, 가, 좌, 우, 와, 빼, 쳐 …): 어절 시작이거나 직전 매칭(+조사) 바로 뒤에서 시작하고,
+//   뒤는 위와 같이 조사·어미 뒤 어절 끝이어야 한다.
+// 이 조사·어미 목록 밖의 글자가 이어지면 다른 단어로 본다.
+
+const PARTICLES = [
+  '으로', '로', '에서', '에게', '한테', '에', '은', '는', '이', '가', '을', '를', '도', '만', '의',
+  '랑', '이랑', '하고', '과', '와', '들', '께', '까지', '쪽', '쪽으로',
+];
+const TAILS = [
+  '요', '라', '줘', '주세요', '세요', '셔', '해', '해요', '해라', '해줘', '해주세요', '하세요', '하라',
+  '하자', '합시다', '합니다', '하십시오', '시오', '자', '서', '주라', '주십시오', '버려', '놔', '놔라',
+  '줄래', '시죠', '십시오', '시다', '세여', '하세여', '해여',
+];
+const esc = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+const SUFFIX_UNITS = [...PARTICLES, ...TAILS].sort((a, b) => b.length - a.length);
+const END_OK = new RegExp(`^(?:${SUFFIX_UNITS.map(esc).join('|')})*(?: |$)`, 'u');
+
+// ---------------------------------------------------------------------------
+// 멘션
+
+type MentionKind = 'party' | 'unknown' | 'all' | 'action' | 'location' | 'marker';
+
+interface Mention {
+  kind: MentionKind;
+  cs: number; // compact 오프셋
+  ce: number;
+  start: number; // 정규화 문자열 오프셋
+  end: number;
+  text: string;
+  value: string; // partyId | 'ALL' | Action | locationId | marker
+  weak: boolean;
+  label?: string;
+}
+
+interface Cand {
+  kind: MentionKind;
+  cs: number;
+  ce: number;
+  value: string;
+  weak: boolean;
+  prio: number;
+}
+
+const PRIO: Record<MentionKind, number> = { party: 0, unknown: 0, location: 1, action: 2, all: 3, marker: 4 };
+
+function collectMentions(t: string, parties: readonly Party[], cd: CompiledDict, d: Dictionary): Mention[] {
+  // compact 텍스트와 오프셋 지도
+  let c = '';
+  const map: number[] = [];
+  for (let i = 0; i < t.length; i++) {
+    if (t[i] !== ' ') {
+      c += t[i];
+      map.push(i);
+    }
+  }
+  if (!c) return [];
+
+  const startsAtToken = (cs: number) => cs === 0 || t[(map[cs] ?? 0) - 1] === ' ';
+  const endOk = (ce: number) => END_OK.test(t.slice((map[ce - 1] ?? 0) + 1));
+
+  const cands: Cand[] = [];
+  const singles: Cand[] = [];
+  const deferred: Cand[] = [];
+  const push = (cand: Cand, len: number) => {
+    if (len === 1) singles.push(cand);
+    else if (len === 2 && !endOk(cand.ce)) deferred.push(cand);
+    else cands.push(cand);
+  };
+
+  // 번호 표현 N파티 (방에 없는 번호도 잡아 FR-F03-9에 쓴다)
+  const byNumber = new Map(parties.map((p) => [p.number, p.id]));
+  for (const m of c.matchAll(/(?<!\d)(\d{1,2})파티/g)) {
+    const n = Number(m[1]);
+    const id = byNumber.get(n);
+    cands.push({
+      kind: id ? 'party' : 'unknown',
+      cs: m.index,
+      ce: m.index + m[0].length,
+      value: id ?? String(n),
+      weak: false,
+      prio: 0,
+    });
+  }
+
+  // 파티 이름·별칭 (번호 형태는 위 정규식이 처리)
+  for (const e of buildPartyLexicon(parties, d.partySuffixes)) {
+    if (e.kind === 'number') continue;
+    for (let i = c.indexOf(e.expression); i >= 0; i = c.indexOf(e.expression, i + 1)) {
+      push({ kind: 'party', cs: i, ce: i + e.expression.length, value: e.partyId, weak: false, prio: 0 }, e.expression.length);
+    }
+  }
+
+  for (const e of cd.exprs) {
+    for (let i = c.indexOf(e.expr); i >= 0; i = c.indexOf(e.expr, i + 1)) {
+      let prio = PRIO[e.kind];
+      // 파티 이름과 행동 표현이 같을 때("수비"): 뒤에 "해/하"가 오면 행동으로 본다
+      if (e.kind === 'action' && /^[해하]/.test(c.slice(i + e.expr.length))) prio = -1;
+      push({ kind: e.kind, cs: i, ce: i + e.expr.length, value: e.value, weak: e.weak, prio }, e.expr.length);
+    }
+  }
+
+  // 긴 것 우선, 같으면 우선순위, 그다음 앞쪽. 겹치면 버린다.
+  const order = (a: Cand, b: Cand) => b.ce - b.cs - (a.ce - a.cs) || a.prio - b.prio || a.cs - b.cs;
+  cands.sort(order);
+  const taken: Cand[] = [];
+  const overlaps = (x: Cand) => taken.some((y) => x.cs < y.ce && y.cs < x.ce);
+  for (const x of cands) if (!overlaps(x)) taken.push(x);
+
+  // 위치 pos에서 조사 사슬을 따라 닿을 수 있는 위치들 (pos 자신 포함)
+  const reach = (pos: number): Set<number> => {
+    const seen = new Set<number>();
+    const q = [pos];
+    while (q.length) {
+      const p = q.pop() as number;
+      if (seen.has(p)) continue;
+      seen.add(p);
+      const rest = c.slice(p);
+      for (const part of PARTICLES) if (rest.startsWith(part)) q.push(p + part.length);
+    }
+    return seen;
+  };
+
+  // 길이 2 표현 중 뒤가 조사·어미가 아닌 것: 바로 뒤에 다른 매칭이 붙어 있으면(띄어쓰기 없는 STT 출력) 살린다
+  for (let changed = true; changed; ) {
+    changed = false;
+    for (const x of deferred.sort(order)) {
+      if (taken.includes(x) || overlaps(x)) continue;
+      const r = reach(x.ce);
+      if (r.has(c.length) || taken.some((y) => r.has(y.cs))) {
+        taken.push(x);
+        changed = true;
+      }
+    }
+  }
+
+  // 한 글자 표현: 어절 시작이거나 직전 매칭(+조사) 바로 뒤여야 한다
+  if (singles.length) {
+    // 조사를 하나 이상 지난 위치만 인정한다. 바로 붙은 "3파티가"의 가는 조사다.
+    const allowed = new Set<number>();
+    for (const y of taken) {
+      const r = reach(y.ce);
+      r.delete(y.ce);
+      for (const p of r) allowed.add(p);
+    }
+    singles.sort(order);
+    for (const x of singles) {
+      if (overlaps(x)) continue;
+      if (!(startsAtToken(x.cs) || allowed.has(x.cs))) continue;
+      if (!endOk(x.ce)) continue;
+      taken.push(x);
+    }
+  }
+
+  taken.sort((a, b) => a.cs - b.cs);
+  return taken.map((x) => {
+    const start = map[x.cs] ?? 0;
+    const end = (map[x.ce - 1] ?? 0) + 1;
+    return {
+      kind: x.kind,
+      cs: x.cs,
+      ce: x.ce,
+      start,
+      end,
+      text: t.slice(start, end),
+      value: x.value,
+      weak: x.weak,
+      label: x.kind === 'location' ? cd.locationLabel.get(x.value) : undefined,
+    };
+  });
+}
+
+// ---------------------------------------------------------------------------
+// 절 나누기·조립
+
+interface Clause {
+  ms: Mention[];
+  borrowed: Mention[]; // 뒤 절에서 채워 온 행동
+  reordered: boolean;
+}
+
+const isTarget = (m: Mention) => m.kind === 'party' || m.kind === 'unknown' || m.kind === 'all';
+
+function flags(ms: Mention[]) {
+  return {
+    hasAction: ms.some((m) => m.kind === 'action'),
+    hasLoc: ms.some((m) => m.kind === 'location'),
+    hasTarget: ms.some(isTarget),
+  };
+}
+
+/** 대상 뒤에 위치가 나왔는가 ("1파티 중앙 ..."). 위치가 먼저인 "중앙으로 1파티 2파티"와 구분한다. */
+function locAfterTarget(ms: Mention[]): boolean {
+  const firstTarget = ms.findIndex(isTarget);
+  return firstTarget >= 0 && ms.some((m, i) => i > firstTarget && m.kind === 'location');
+}
+
+/** 대상이 나올 때마다 절을 나눈다. 단, 앞 절에 아직 행동·위치가 없으면(= 여러 파티 나열) 같은 절이다. */
+function splitClauses(ms: Mention[]): Clause[] {
+  const clauses: Clause[] = [];
+  let cur: Clause = { ms: [], borrowed: [], reordered: false };
+  for (const m of ms) {
+    if (isTarget(m)) {
+      const f = flags(cur.ms);
+      if (f.hasAction || locAfterTarget(cur.ms)) {
+        clauses.push(cur);
+        cur = { ms: [], borrowed: [], reordered: false };
+      }
+    }
+    cur.ms.push(m);
+  }
+  if (cur.ms.length) clauses.push(cur);
+
+  // 순서가 뒤바뀐 발화 합치기: "1파티 지원 2파티", "중앙으로 모여 1파티 2파티"
+  const out: Clause[] = [];
+  for (const c of clauses) {
+    const prev = out[out.length - 1];
+    const f = flags(c.ms);
+    const targetOnly = f.hasTarget && !f.hasAction && !f.hasLoc;
+    if (prev && targetOnly) {
+      const pf = flags(prev.ms);
+      const prevParties = prev.ms.filter((m) => m.kind === 'party').length;
+      const prevSupport = prev.ms.some((m) => m.kind === 'action' && m.value === 'SUPPORT');
+      if ((prevSupport && prevParties < 2) || (pf.hasAction && !pf.hasTarget)) {
+        prev.ms = [...prev.ms, ...c.ms];
+        prev.reordered = true;
+        continue;
+      }
+    }
+    out.push(c);
+  }
+
+  // 행동이 뒤에 한 번만 나오면 앞의 행동 없는 절에 적용
+  let next: Mention[] | null = null;
+  for (let i = out.length - 1; i >= 0; i--) {
+    const c = out[i] as Clause;
+    const acts = c.ms.filter((m) => m.kind === 'action');
+    if (acts.length) next = acts;
+    else if (next) c.borrowed = next;
+  }
+  return out;
+}
+
+interface Built {
+  target?: Target;
+  action?: Action;
+  location?: Location;
+  supportPartyIds?: PartyId[];
+  conflict: boolean;
+  weak: boolean;
+  filled: boolean;
+  reordered: boolean;
+  unknown?: string;
+  evidence: Match[];
+}
+
+function toMatch(m: Mention, slot: MatchSlot): Match {
+  return { slot, text: m.text, start: m.start, end: m.end, value: m.value };
+}
+
+function uniq<T>(xs: T[]): T[] {
+  return [...new Set(xs)];
+}
+
+function buildClause(cl: Clause): Built {
+  const ms = cl.ms;
+  const unknown = ms.find((m) => m.kind === 'unknown');
+  // 강한 행동이 있으면 약한 행동("이쪽으로", "와" …)은 부가어로 보고 무시한다
+  const ownAll = ms.filter((m) => m.kind === 'action');
+  const own = ownAll.some((m) => !m.weak) ? ownAll.filter((m) => !m.weak) : ownAll;
+  const filled = own.length === 0 && cl.borrowed.length > 0;
+  const actionMs = own.length ? own : cl.borrowed;
+  const locMs = ms.filter((m) => m.kind === 'location');
+  const evidence: Match[] = [];
+
+  const action = actionMs.length ? (actionMs[actionMs.length - 1]?.value as Action) : undefined;
+  const conflictA = uniq(own.map((m) => m.value)).length > 1;
+  const weak = actionMs.length > 0 && actionMs.filter((m) => m.value === action).every((m) => m.weak);
+  const locValue = locMs.length ? locMs[locMs.length - 1] : undefined;
+  const conflictL = uniq(locMs.map((m) => m.value)).length > 1;
+
+  // 대상
+  const tms = ms.filter((m) => m.kind === 'party' || m.kind === 'all');
+  const partyMs = tms.filter((m) => m.kind === 'party');
+  let target: Target | undefined;
+  let supportIds: PartyId[] | undefined;
+  let supportMs: Mention[] = [];
+  let actorMs: Mention[] = tms;
+  if (action === 'SUPPORT' && tms.length) {
+    const first = tms[0] as Mention;
+    if (first.kind === 'all') {
+      target = { kind: 'ALL' };
+      supportMs = partyMs;
+      actorMs = [first];
+    } else {
+      target = { kind: 'PARTIES', partyIds: [first.value] };
+      supportMs = partyMs.filter((m) => m !== first && m.value !== first.value);
+      actorMs = [first];
+    }
+    const ids = uniq(supportMs.map((m) => m.value));
+    if (ids.length) supportIds = ids;
+    supportMs = supportMs.filter((m, i, a) => a.findIndex((x) => x.value === m.value) === i);
+  } else if (partyMs.length) {
+    target = { kind: 'PARTIES', partyIds: uniq(partyMs.map((m) => m.value)) };
+    actorMs = partyMs;
+  } else if (tms.length) {
+    target = { kind: 'ALL' };
+  }
+
+  for (const m of actorMs) evidence.push(toMatch(m, 'target'));
+  for (const m of supportMs) evidence.push(toMatch(m, 'support'));
+  for (const m of locMs) evidence.push(toMatch(m, 'location'));
+  for (const m of actionMs) evidence.push(toMatch(m, 'action'));
+  evidence.sort((a, b) => a.start - b.start);
+
+  const location: Location | undefined = locValue
+    ? { id: locValue.value, label: locValue.label ?? locValue.value }
+    : undefined;
+
+  return {
+    target,
+    action,
+    location,
+    supportPartyIds: supportIds,
+    conflict: conflictA || conflictL,
+    weak,
+    filled,
+    reordered: cl.reordered,
+    unknown: unknown?.value,
+    evidence,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// 정정·취소
+
+function sameTarget(a: Target, b: Target): boolean {
+  if (a.kind !== b.kind) return false;
+  if (a.kind === 'ALL') return true;
+  const bb = b as Extract<Target, { kind: 'PARTIES' }>;
+  const x = [...a.partyIds].sort().join('|');
+  const y = [...bb.partyIds].sort().join('|');
+  return x === y;
+}
+
+function tryCorrect(
+  ctx: ParseContext,
+  before: Mention[],
+  after: Mention[],
+  markers: Mention[],
+  strongMarker: boolean,
+): ParseResult | 'none' | { unknown: string } {
+  const last = ctx.lastVoiceCommand as NonNullable<ParseContext['lastVoiceCommand']>;
+  const aClauses = splitClauses(after);
+  const first = aClauses[0];
+  if (!first) return 'none';
+  const b = buildClause(first);
+  if (b.unknown) return { unknown: b.unknown };
+  const patch: Partial<CommandDraft> = {};
+  if (b.target) patch.target = b.target;
+  if (b.action && !b.filled) patch.action = b.action;
+  if (b.location) patch.location = b.location;
+  if (b.supportPartyIds) patch.supportPartyIds = b.supportPartyIds;
+  if (Object.keys(patch).length === 0) return 'none';
+
+  // 말고 앞쪽이 직전 명령의 값과 같은지 확인
+  let verified = false;
+  const bClauses = splitClauses(before);
+  const bf = bClauses[0];
+  if (bf && strongMarker) {
+    const bb = buildClause({ ...bf, borrowed: [] });
+    if (!bb.unknown) {
+      const lc = last.command;
+      const checks: boolean[] = [];
+      if (bb.target) checks.push(lc.target !== undefined && sameTarget(bb.target, lc.target));
+      if (bb.action) checks.push(bb.action === lc.action);
+      if (bb.location) checks.push(bb.location.id === lc.location?.id);
+      verified = checks.length > 0 && checks.every(Boolean);
+    }
+  }
+  const high = verified && aClauses.length === 1 && !b.conflict && !(patch.action && b.weak);
+  const evidence = [...markers.map((m) => toMatch(m, 'correction')), ...b.evidence].sort((x, y) => x.start - y.start);
+  return {
+    kind: 'CORRECT',
+    correctsId: last.command.id,
+    patch,
+    confidence: high ? 'HIGH' : 'MEDIUM',
+    evidence,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// parse
+
+export function parse(text: string, ctx: ParseContext): ParseResult[] {
+  const d = ctx.dictionary;
+  const cd = compileDict(d);
+  const t = normalize(text, d);
+  if (!t) return [{ kind: 'NONE', reason: '빈 발화' }];
+
+  // 취소
+  {
+    const compact = t.replace(/ /g, '');
+    const map: number[] = [];
+    for (let i = 0; i < t.length; i++) if (t[i] !== ' ') map.push(i);
+    for (const phrase of cd.cancel) {
+      const i = compact.indexOf(phrase);
+      if (i < 0) continue;
+      if (!ctx.lastVoiceCommand) return [{ kind: 'NONE', reason: 'no previous command' }];
+      const start = map[i] ?? 0;
+      const end = (map[i + phrase.length - 1] ?? 0) + 1;
+      return [
+        {
+          kind: 'CANCEL',
+          commandId: ctx.lastVoiceCommand.command.id,
+          evidence: [{ slot: 'cancel', text: t.slice(start, end), start, end, value: phrase }],
+        },
+      ];
+    }
+  }
+
+  const all = collectMentions(t, ctx.parties, cd, d);
+  const markers = all.filter((m) => m.kind === 'marker');
+  let body = all.filter((m) => m.kind !== 'marker');
+  let capMedium = false;
+
+  if (markers.length) {
+    const lastMarker = markers[markers.length - 1] as Mention;
+    const before = all.filter((m) => m.kind !== 'marker' && m.ce <= lastMarker.cs);
+    const after = all.filter((m) => m.kind !== 'marker' && m.cs >= lastMarker.ce);
+    const hasSlots = after.some((m) => m.kind !== 'marker');
+    if (hasSlots) {
+      const lv = ctx.lastVoiceCommand;
+      if (lv && ctx.now - lv.issuedAt <= LIMITS.correctionWindowMs) {
+        const strong = markers.some((m) => m.value !== '아니');
+        const r = tryCorrect(ctx, before, after, markers, strong);
+        if (typeof r === 'object' && 'kind' in r) return [r];
+        if (typeof r === 'object' && 'unknown' in r)
+          return [{ kind: 'NONE', reason: `방에 없는 파티: ${r.unknown}` }];
+      }
+      // 정정이 아니면 정정어 뒤쪽만 새 명령으로 본다 (앞쪽은 부정된 내용).
+      // 앞쪽에 내용이 있었다면(무엇을 부정하는지 모르므로) 확신도는 중간으로 제한한다.
+      body = after;
+      capMedium = before.length > 0 && markers.some((m) => m.value !== '아니');
+    }
+  }
+
+  // "1파티 빼고", "제외": 제외 표현이 있으면 대상 해석을 믿을 수 없다
+  if (/빼고|제외|빼면|말구/.test(t.replace(/ /g, ''))) capMedium = true;
+  const res = issue(body, ctx);
+  if (!capMedium) return res;
+  return res.map((r) => (r.kind === 'ISSUE' ? { ...r, confidence: 'MEDIUM' as const } : r));
+}
+
+function issue(ms: Mention[], ctx: ParseContext): ParseResult[] {
+  if (ms.length === 0) return [{ kind: 'NONE', reason: '명령 표현 없음' }];
+  const asAll = ctx.options?.targetlessAsAll === true;
+  const results: ParseResult[] = [];
+  let unknownParty: string | undefined;
+  let weakOnly = false;
+
+  for (const cl of splitClauses(ms)) {
+    const b = buildClause(cl);
+    if (b.unknown) {
+      unknownParty ??= b.unknown;
+      continue;
+    }
+    if (!b.action) continue;
+    if (b.weak && !b.target && !b.location) {
+      weakOnly = true;
+      continue;
+    }
+    const targetless = !b.target;
+    const supportMissing = b.action === 'SUPPORT' && !b.supportPartyIds && !b.location;
+    const high =
+      !b.weak && !b.conflict && !b.filled && !b.reordered && !supportMissing && (!targetless || asAll);
+    const draft: CommandDraft = { target: b.target ?? { kind: 'ALL' }, action: b.action };
+    if (b.location) draft.location = b.location;
+    if (b.supportPartyIds) draft.supportPartyIds = b.supportPartyIds;
+    const evidence = b.evidence;
+    results.push({ kind: 'ISSUE', draft, confidence: high ? 'HIGH' : 'MEDIUM', evidence });
+  }
+
+  if (results.length) return results;
+  if (unknownParty) return [{ kind: 'NONE', reason: `방에 없는 파티: ${unknownParty}` }];
+  if (weakOnly) return [{ kind: 'NONE', reason: '모호한 행동 표현뿐 (대상·위치 없음)' }];
+  return [{ kind: 'NONE', reason: '행동 없음' }];
+}

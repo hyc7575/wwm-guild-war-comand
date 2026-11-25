@@ -1,0 +1,26 @@
+// 정규화 변형: 숫자 말, 접미사, 나열, 붙여 쓰기
+{"text": "1 파티 2 파티 중앙으로 모여", "expect": [{"kind": "ISSUE", "confidence": "HIGH", "target": [1, 2], "action": "GATHER", "location": "CENTER"}]}
+{"text": "일파티 이파티 중앙 모여", "expect": [{"kind": "ISSUE", "confidence": "HIGH", "target": [1, 2], "action": "GATHER", "location": "CENTER"}]}
+{"text": "삼 팟 쳐", "expect": [{"kind": "ISSUE", "confidence": "HIGH", "target": [3], "action": "ATTACK"}]}
+{"text": "1,2파티 중앙 모여", "expect": [{"kind": "ISSUE", "confidence": "HIGH", "target": [1, 2], "action": "GATHER", "location": "CENTER"}]}
+{"text": "1·2파티 모여", "expect": [{"kind": "ISSUE", "confidence": "HIGH", "target": [1, 2], "action": "GATHER"}]}
+{"text": "1 2 파티 공격", "expect": [{"kind": "ISSUE", "confidence": "HIGH", "target": [1, 2], "action": "ATTACK"}]}
+{"text": "1번 파티 대기", "expect": [{"kind": "ISSUE", "confidence": "HIGH", "target": [1], "action": "HOLD"}]}
+{"text": "1하고 2파티 중앙 모여", "expect": [{"kind": "ISSUE", "confidence": "HIGH", "target": [1, 2], "action": "GATHER", "location": "CENTER"}]}
+{"text": "1과 2파티 지켜", "expect": [{"kind": "ISSUE", "confidence": "HIGH", "target": [1, 2], "action": "DEFEND"}]}
+{"text": "1~3파티 공격", "expect": [{"kind": "ISSUE", "confidence": "HIGH", "target": [1, 2, 3], "action": "ATTACK"}]}
+{"text": "십이파티 모여", "partyCount": 12, "expect": [{"kind": "ISSUE", "confidence": "HIGH", "target": [12], "action": "GATHER"}]}
+{"text": "열두파티 지켜", "partyCount": 12, "expect": [{"kind": "ISSUE", "confidence": "HIGH", "target": [12], "action": "DEFEND"}]}
+{"text": "첫 파티 중앙 모여", "expect": [{"kind": "ISSUE", "confidence": "HIGH", "target": [1], "action": "GATHER", "location": "CENTER"}]}
+{"text": "두 파티 쳐", "expect": [{"kind": "ISSUE", "confidence": "HIGH", "target": [2], "action": "ATTACK"}]}
+{"text": "이파티 중앙으로 모여", "note": "붙여 쓴 이파티는 2파티", "expect": [{"kind": "ISSUE", "confidence": "HIGH", "target": [2], "action": "GATHER", "location": "CENTER"}]}
+{"text": "이 파티 중앙으로 모여", "note": "지시어 \"이 파티\"는 번호가 아니다", "expect": [{"kind": "ISSUE", "confidence": "MEDIUM", "target": "ALL", "action": "GATHER", "location": "CENTER"}]}
+{"text": "이번 파티 중앙 모여", "expect": [{"kind": "ISSUE", "confidence": "MEDIUM", "target": "ALL", "action": "GATHER", "location": "CENTER"}]}
+{"text": "1파티2파티중앙으로모여", "note": "띄어쓰기 없는 STT 출력", "expect": [{"kind": "ISSUE", "confidence": "HIGH", "target": [1, 2], "action": "GATHER", "location": "CENTER"}]}
+{"text": "3파티오른쪽지켜", "expect": [{"kind": "ISSUE", "confidence": "HIGH", "target": [3], "action": "DEFEND", "location": "RIGHT"}]}
+{"text": "3파티중앙모여", "expect": [{"kind": "ISSUE", "confidence": "HIGH", "target": [3], "action": "GATHER", "location": "CENTER"}]}
+{"text": "전원뒤로빠져", "expect": [{"kind": "ISSUE", "confidence": "HIGH", "target": "ALL", "action": "RETREAT"}]}
+{"text": "3파티 오른쪽으로,  이동!", "expect": [{"kind": "ISSUE", "confidence": "HIGH", "target": [3], "action": "MOVE", "location": "RIGHT"}]}
+{"text": "３파티 중앙 모여", "note": "전각 숫자", "expect": [{"kind": "ISSUE", "confidence": "HIGH", "target": [3], "action": "GATHER", "location": "CENTER"}]}
+{"text": "일이파티 모여", "knownFailure": true, "reason": "붙여 쓴 \"일이파티\"는 1·2파티인지 알 수 없어 미지원 (일파티 이파티 / 1,2파티는 지원)", "expect": [{"kind": "ISSUE", "confidence": "HIGH", "target": [1, 2], "action": "GATHER"}]}
+{"text": "1파티 빼고 다 모여", "knownFailure": true, "reason": "제외 표현 미지원. 확신도는 중간으로 제한되지만 대상은 틀리게 나온다", "expect": [{"kind": "ISSUE", "confidence": "MEDIUM", "target": [2, 3, 4, 5, 6], "action": "GATHER"}]}

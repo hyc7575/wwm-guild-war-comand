@@ -1,0 +1,28 @@
+// 정정·취소
+{"text": "아니 3파티 말고 4파티", "last": {"target": [3], "action": "GATHER", "location": "CENTER", "ageMs": 3000}, "expect": [{"kind": "CORRECT", "confidence": "HIGH", "patch": {"target": [4]}}]}
+{"text": "중앙 말고 우측", "last": {"target": [1], "action": "GATHER", "location": "CENTER", "ageMs": 3000}, "expect": [{"kind": "CORRECT", "confidence": "HIGH", "patch": {"location": "RIGHT"}}]}
+{"text": "중앙 말고 오른쪽으로 이동", "last": {"target": [1], "action": "GATHER", "location": "LEFT", "ageMs": 3000}, "note": "말고 앞 내용이 직전 명령과 다르면 중간", "expect": [{"kind": "CORRECT", "confidence": "MEDIUM", "patch": {"action": "MOVE", "location": "RIGHT"}}]}
+{"text": "3파티 말고 4파티 중앙", "last": {"target": [3], "action": "GATHER", "location": "LEFT", "ageMs": 3000}, "expect": [{"kind": "CORRECT", "confidence": "HIGH", "patch": {"target": [4], "location": "CENTER"}}]}
+{"text": "아니 우측으로", "last": {"target": [1], "action": "GATHER", "location": "CENTER", "ageMs": 3000}, "note": "앞 내용이 없는 \"아니\"는 중간", "expect": [{"kind": "CORRECT", "confidence": "MEDIUM", "patch": {"location": "RIGHT"}}]}
+{"text": "아니고 우측으로 가세요", "last": {"target": [1], "action": "GATHER", "location": "CENTER", "ageMs": 3000}, "expect": [{"kind": "CORRECT", "confidence": "MEDIUM", "patch": {"action": "MOVE", "location": "RIGHT"}}]}
+{"text": "중앙 말고 오른쪽으로 이동", "last": {"target": [1], "action": "GATHER", "location": "CENTER", "ageMs": 20000}, "note": "15초 지남: 새 명령", "expect": [{"kind": "ISSUE", "confidence": "MEDIUM", "target": "ALL", "action": "MOVE", "location": "RIGHT"}]}
+{"text": "중앙 말고 오른쪽으로 이동", "note": "직전 명령 없음", "expect": [{"kind": "ISSUE", "confidence": "MEDIUM", "target": "ALL", "action": "MOVE", "location": "RIGHT"}]}
+{"text": "중앙 말고 우측", "last": {"target": [1], "action": "GATHER", "location": "CENTER", "ageMs": 15000}, "note": "정확히 15초는 창 안", "expect": [{"kind": "CORRECT", "confidence": "HIGH", "patch": {"location": "RIGHT"}}]}
+{"text": "중앙 말고 우측", "last": {"target": [1], "action": "GATHER", "location": "CENTER", "ageMs": 15001}, "note": "15초 초과: 새 명령이지만 행동이 없다", "expect": [{"kind": "NONE"}]}
+{"text": "3파티 말고 4파티 쳐", "note": "직전 명령 없음", "expect": [{"kind": "ISSUE", "confidence": "MEDIUM", "target": [4], "action": "ATTACK"}]}
+{"text": "오른쪽 말고 왼쪽 지켜", "last": {"target": [2], "action": "DEFEND", "location": "RIGHT", "ageMs": 3000}, "expect": [{"kind": "CORRECT", "confidence": "HIGH", "patch": {"action": "DEFEND", "location": "LEFT"}}]}
+{"text": "3파티 말고 9파티", "last": {"target": [3], "action": "GATHER", "location": "CENTER", "ageMs": 3000}, "note": "없는 파티로 정정", "expect": [{"kind": "NONE"}]}
+{"text": "1파티 말고", "last": {"target": [1], "action": "GATHER", "ageMs": 3000}, "expect": [{"kind": "NONE"}]}
+{"text": "중앙 말고", "last": {"target": [1], "action": "GATHER", "location": "CENTER", "ageMs": 3000}, "expect": [{"kind": "NONE"}]}
+{"text": "아니 근데 상대 많네요", "last": {"target": [1], "action": "GATHER", "location": "CENTER", "ageMs": 3000}, "expect": [{"kind": "NONE"}]}
+{"text": "1파티 말고 전원 쳐", "last": {"target": [1], "action": "GATHER", "ageMs": 3000}, "expect": [{"kind": "CORRECT", "confidence": "HIGH", "patch": {"target": "ALL", "action": "ATTACK"}}]}
+{"text": "공격 말고 방어", "last": {"target": [3], "action": "ATTACK", "ageMs": 3000}, "expect": [{"kind": "CORRECT", "confidence": "HIGH", "patch": {"action": "DEFEND"}}]}
+{"text": "아니 3파티 오른쪽 지켜", "note": "직전 명령 없고 앞쪽도 없으면 정상 판정", "expect": [{"kind": "ISSUE", "confidence": "HIGH", "target": [3], "action": "DEFEND", "location": "RIGHT"}]}
+{"text": "취소 취소", "last": {"target": [1], "action": "GATHER", "location": "CENTER", "ageMs": 3000}, "expect": [{"kind": "CANCEL"}]}
+{"text": "방금꺼 취소", "last": {"target": [1], "action": "GATHER", "location": "CENTER", "ageMs": 3000}, "expect": [{"kind": "CANCEL"}]}
+{"text": "방금거 취소", "last": {"target": [1], "action": "GATHER", "location": "CENTER", "ageMs": 3000}, "expect": [{"kind": "CANCEL"}]}
+{"text": "명령 취소", "last": {"target": [1], "action": "GATHER", "location": "CENTER", "ageMs": 3000}, "expect": [{"kind": "CANCEL"}]}
+{"text": "취소해", "last": {"target": [1], "action": "GATHER", "location": "CENTER", "ageMs": 3000}, "expect": [{"kind": "CANCEL"}]}
+{"text": "아까 거 취소해줘", "last": {"target": [1], "action": "GATHER", "location": "CENTER", "ageMs": 3000}, "expect": [{"kind": "CANCEL"}]}
+{"text": "방금 거 취소", "note": "직전 명령 없음", "expect": [{"kind": "NONE"}]}
+{"text": "취소", "last": {"target": [1], "action": "GATHER", "location": "CENTER", "ageMs": 3000}, "expect": [{"kind": "NONE"}]}

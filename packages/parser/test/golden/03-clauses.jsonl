@@ -1,0 +1,17 @@
+// 절 나누기, 다중 대상, 충돌, 방에 없는 파티
+{"text": "1파티 중앙, 3파티 오른쪽 지켜", "expect": [{"kind": "ISSUE", "confidence": "MEDIUM", "target": [1], "action": "DEFEND", "location": "CENTER"}, {"kind": "ISSUE", "confidence": "HIGH", "target": [3], "action": "DEFEND", "location": "RIGHT"}]}
+{"text": "1파티 중앙으로 모여 3파티 우측으로 이동", "expect": [{"kind": "ISSUE", "confidence": "HIGH", "target": [1], "action": "GATHER", "location": "CENTER"}, {"kind": "ISSUE", "confidence": "HIGH", "target": [3], "action": "MOVE", "location": "RIGHT"}]}
+{"text": "2파티 공격 4파티 방어", "expect": [{"kind": "ISSUE", "confidence": "HIGH", "target": [2], "action": "ATTACK"}, {"kind": "ISSUE", "confidence": "HIGH", "target": [4], "action": "DEFEND"}]}
+{"text": "1파티 2파티 중앙 3파티 4파티 우측 방어", "expect": [{"kind": "ISSUE", "confidence": "MEDIUM", "target": [1, 2], "action": "DEFEND", "location": "CENTER"}, {"kind": "ISSUE", "confidence": "HIGH", "target": [3, 4], "action": "DEFEND", "location": "RIGHT"}]}
+{"text": "1파티 2파티 중앙으로 모여 3파티는 오른쪽으로 이동", "expect": [{"kind": "ISSUE", "confidence": "HIGH", "target": [1, 2], "action": "GATHER", "location": "CENTER"}, {"kind": "ISSUE", "confidence": "HIGH", "target": [3], "action": "MOVE", "location": "RIGHT"}]}
+{"text": "중앙으로 1파티 2파티 모여", "expect": [{"kind": "ISSUE", "confidence": "HIGH", "target": [1, 2], "action": "GATHER", "location": "CENTER"}]}
+{"text": "모여 1파티 2파티", "note": "대상이 뒤에 온 발화는 후보", "expect": [{"kind": "ISSUE", "confidence": "MEDIUM", "target": [1, 2], "action": "GATHER"}]}
+{"text": "3파티 모여 쳐", "note": "한 절에 서로 다른 행동", "expect": [{"kind": "ISSUE", "confidence": "MEDIUM", "target": [3], "action": "ATTACK"}]}
+{"text": "3파티 중앙 우측 지켜", "note": "한 절에 서로 다른 위치", "expect": [{"kind": "ISSUE", "confidence": "MEDIUM", "target": [3], "action": "DEFEND", "location": "RIGHT"}]}
+{"text": "1파티 1파티 모여", "expect": [{"kind": "ISSUE", "confidence": "HIGH", "target": [1], "action": "GATHER"}]}
+{"text": "1파티 2파티 전원 모여", "note": "전원은 수식어로 본다", "expect": [{"kind": "ISSUE", "confidence": "HIGH", "target": [1, 2], "action": "GATHER"}]}
+{"text": "9파티 중앙으로 모여", "note": "방에 없는 파티(FR-F03-9)", "expect": [{"kind": "NONE"}]}
+{"text": "1파티 9파티 모여", "expect": [{"kind": "NONE"}]}
+{"text": "9파티 쳐 1파티 지켜", "note": "없는 파티 절만 버린다", "expect": [{"kind": "ISSUE", "confidence": "HIGH", "target": [1], "action": "DEFEND"}]}
+{"text": "6파티 쳐", "partyCount": 6, "expect": [{"kind": "ISSUE", "confidence": "HIGH", "target": [6], "action": "ATTACK"}]}
+{"text": "6파티 쳐", "partyCount": 4, "note": "4파티 방에서 6파티", "expect": [{"kind": "NONE"}]}
