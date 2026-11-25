@@ -7,7 +7,10 @@
     "dev": "wrangler dev --port 8787",
     "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.integration.json",
     "test": "vitest run --passWithNoTests",
-    "test:integration": "tsx test-integration/run.ts"
+    "test:integration": "tsx test-integration/run.ts",
+    "dev:assets": "wrangler dev -c wrangler.deploy.jsonc --port 8788",
+    "build:deploy": "pnpm --filter @winds/web build && wrangler deploy -c wrangler.deploy.jsonc --dry-run --outdir .wrangler/dryrun",
+    "deploy": "pnpm --filter @winds/web build && wrangler deploy -c wrangler.deploy.jsonc"
   },
   "dependencies": {
     "@winds/protocol": "workspace:*",

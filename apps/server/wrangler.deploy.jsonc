@@ -1,0 +1,23 @@
+{
+  // Deploy config: same Worker as wrangler.jsonc + the built web app as Workers Static Assets.
+  // Kept separate so `wrangler dev` / integration tests / load tests keep working without a web build
+  // (wrangler refuses to start when assets.directory is missing).
+  // Always pass it explicitly: `wrangler deploy -c wrangler.deploy.jsonc` (see package.json scripts).
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "winds-command",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-11-01",
+  "dev": { "port": 8787 },
+  // Only /api/* runs the Worker first (rooms + WebSocket). Everything else is served from assets,
+  // and unknown paths fall back to index.html (SPA routes such as /r/ABC123, /guide).
+  // Per-file limit is 25 MiB (sherpa wasm ~15.7MB is fine); STT models are NOT deployed (loaded from Hugging Face).
+  "assets": {
+    "directory": "../web/dist",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": ["/api/*"]
+  },
+  "durable_objects": {
+    "bindings": [{ "name": "ROOM", "class_name": "RoomDO" }]
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["RoomDO"] }]
+}

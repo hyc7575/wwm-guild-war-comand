@@ -7,6 +7,7 @@ import { JoinPage } from './pages/JoinPage';
 const Create = lazy(() => import('./commander').then((m) => ({ default: m.Create })));
 const CommanderRoom = lazy(() => import('./commander').then((m) => ({ default: m.CommanderRoom })));
 const Bench = lazy(() => import('./bench').then((m) => ({ default: m.BenchPage })));
+const Guide = lazy(() => import('./guide').then((m) => ({ default: m.GuidePage })));
 const Operator = lazy(() => import('./operator').then((m) => ({ default: m.Operator })));
 
 export function AppRoutes() {
@@ -18,6 +19,7 @@ export function AppRoutes() {
         <Route path="/create" element={<Create />} />
         <Route path="/c/:code" element={<CommanderRoom />} />
         <Route path="/o/:code" element={<Operator />} />
+        <Route path="/guide" element={<Guide />} />
         <Route path="/bench" element={<Bench />} />
         <Route path="*" element={<HomePage />} />
       </Routes>

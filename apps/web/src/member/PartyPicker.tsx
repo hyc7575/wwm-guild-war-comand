@@ -39,6 +39,11 @@ export function PartyPicker({ parties, counts, hasCounts, selected, onPick, onCa
           아직 모름
         </button>
       </div>
+      <p style={{ marginTop: 16 }}>
+        <a href="/guide" target="_blank" rel="noopener">
+          사용 안내
+        </a>
+      </p>
       {onCancel && (
         <button type="button" className={styles.cancel} onClick={onCancel}>
           닫기

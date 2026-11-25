@@ -17,6 +17,9 @@ export function HomePage() {
           방 만들기
         </Link>
       </section>
+      <p className={styles.dim}>
+        <Link to="/guide">처음이신가요? 사용 안내 보기</Link>
+      </p>
     </main>
   );
 }
