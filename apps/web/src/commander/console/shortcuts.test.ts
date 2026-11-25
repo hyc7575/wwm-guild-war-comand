@@ -47,4 +47,14 @@ describe('isTypingContext', () => {
     expect(isTypingContext(document.body)).toBe(true);
     d.remove();
   });
+  it('is false for switch/checkbox/radio/button inputs so shortcuts survive clicking a toggle', () => {
+    for (const type of ['checkbox', 'radio', 'button']) {
+      const i = document.createElement('input');
+      i.type = type;
+      expect(isTypingContext(i)).toBe(false);
+    }
+    const text = document.createElement('input');
+    text.type = 'text';
+    expect(isTypingContext(text)).toBe(true);
+  });
 });

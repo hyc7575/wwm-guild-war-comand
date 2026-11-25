@@ -3,7 +3,7 @@ import { Button, Group, Paper, Stack, Text, Title } from '@mantine/core';
 import type { CommandDraft } from '@winds/parser';
 import type { Action } from '@winds/protocol';
 import { useRoomStore } from '../../state/roomStore';
-import { AckStatusList, AckToasts, UnsentList } from './AckPanel';
+import { AckStatusList, AckToasts, ErrorToast, UnsentList } from './AckPanel';
 import { ButtonPanel } from './ButtonPanel';
 import { CandidatesBar } from './CandidatesBar';
 import { useConsole } from './ConsoleProvider';
@@ -27,10 +27,12 @@ interface Props {
   operatorToken?: string;
   /** Commander only: content of the top-bar STT slot. Defaults to the placeholder. */
   sttSlot?: ReactNode;
+  /** Commander only: open the invite modal on mount (arrived from /create). */
+  openInvite?: boolean;
 }
 
 /** F08 console. Commander and operator share everything except admin (parties, settings, close, STT). */
-export function Console({ mode, code, operatorToken, sttSlot }: Props) {
+export function Console({ mode, code, operatorToken, sttSlot, openInvite }: Props) {
   const c = useConsole();
   const parties = useRoomStore((s) => s.parties);
   const connection = useRoomStore((s) => s.connection);
@@ -108,7 +110,7 @@ export function Console({ mode, code, operatorToken, sttSlot }: Props) {
 
   return (
     <div className={styles.root}>
-      <TopBar mode={mode} code={code} operatorToken={operatorToken} sttSlot={mode === 'commander' ? (sttSlot ?? <SttSlot />) : undefined} />
+      <TopBar mode={mode} code={code} operatorToken={operatorToken} openInvite={openInvite} sttSlot={mode === 'commander' ? (sttSlot ?? <SttSlot />) : undefined} />
 
       <div className={styles.cols}>
         <Paper withBorder p="sm">
@@ -175,6 +177,7 @@ export function Console({ mode, code, operatorToken, sttSlot }: Props) {
         </Group>
       )}
       <AckToasts />
+      <ErrorToast />
     </div>
   );
 }

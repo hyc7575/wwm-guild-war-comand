@@ -9,12 +9,13 @@ interface Props {
   code: string;
   operatorToken?: string;
   sttSlot?: ReactNode;
+  openInvite?: boolean;
 }
 
-export function TopBar({ mode, code, operatorToken, sttSlot }: Props) {
+export function TopBar({ mode, code, operatorToken, sttSlot, openInvite }: Props) {
   const c = useConsole();
   const total = useRoomStore((s) => s.presence.total);
-  const [invite, setInvite] = useState(false);
+  const [invite, setInvite] = useState(!!openInvite);
   const [closing, setClosing] = useState(false);
 
   return (
@@ -29,7 +30,7 @@ export function TopBar({ mode, code, operatorToken, sttSlot }: Props) {
         {mode === 'commander' && (
           <Group gap="xs">
             <Button variant="default" onClick={() => setInvite(true)} data-testid="invite-open">
-              초대
+              초대 링크
             </Button>
             <Button color="red" variant="light" onClick={() => setClosing(true)} data-testid="room-close">
               방 종료

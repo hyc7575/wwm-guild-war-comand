@@ -19,7 +19,7 @@ const cmd = (id: string, seq: number, partyIds: string[] | 'ALL', extra: Partial
   ...extra,
 });
 
-function harness() {
+function harness(now?: () => number) {
   const useStore = create<RoomData & { dismissUnsent(id: string): void }>(() => ({
     ...initialRoomData(),
     parties: makeDefaultParties(3),
@@ -40,6 +40,7 @@ function harness() {
     store: useStore as unknown as ConsoleStore,
     tuningLog: new MemoryTuningLog(),
     metrics,
+    ...(now ? { now } : {}),
   });
   const apply = (msg: any) => useStore.setState((s) => applyServerMessage(s, msg));
   return { c, sent, useStore, apply, metrics };
@@ -83,6 +84,28 @@ describe('ConsoleController', () => {
     useStore.setState({ slots: { p1: ['B'] }, commands: { B: cmd('B', 2, ['p1']) } });
     c.cancelLast();
     apply({ v: 1, type: 'ack', clientCmdId: 'r1', error: 'RATE_LIMITED' });
+    c.cancelLast();
+    expect(sent).toHaveLength(2);
+  });
+
+  it('a cancel reported unsent can be retried (not skipped forever)', () => {
+    const { c, sent, useStore } = harness();
+    useStore.setState({ slots: { p1: ['B'] }, commands: { B: cmd('B', 2, ['p1']) } });
+    c.cancelLast();
+    expect(c.cancelLast()).toBeUndefined();
+    useStore.setState({ unsent: [{ clientCmdId: 'r1', createdAt: 0, reason: 'NO_ACK', msg: { type: 'command.cancel', commandId: 'B' } }] });
+    c.cancelLast();
+    expect(sent.map((s) => s.input.commandId)).toEqual(['B', 'B']);
+  });
+
+  it('in-flight cancels expire after 10s', () => {
+    let t = 1000;
+    const { c, sent, useStore } = harness(() => t);
+    useStore.setState({ slots: { p1: ['B'] }, commands: { B: cmd('B', 2, ['p1']) } });
+    c.cancelLast();
+    t += 9000;
+    expect(c.cancelLast()).toBeUndefined();
+    t += 2000;
     c.cancelLast();
     expect(sent).toHaveLength(2);
   });

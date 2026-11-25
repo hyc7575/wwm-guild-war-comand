@@ -17,7 +17,8 @@ export interface ConsoleClient {
 }
 
 export interface ConsoleStore {
-  getState(): Pick<RoomStore, 'parties' | 'settings' | 'commands' | 'slots' | 'ackLog' | 'ackCounter' | 'dismissUnsent'>;
+  getState(): Pick<RoomStore, 'parties' | 'settings' | 'commands' | 'slots' | 'ackLog' | 'ackCounter' | 'dismissUnsent'> &
+    Partial<Pick<RoomStore, 'unsent'>>;
   subscribe(fn: (s: ReturnType<ConsoleStore['getState']>, prev: ReturnType<ConsoleStore['getState']>) => void): () => void;
 }
 
@@ -44,6 +45,8 @@ export interface TextPreview {
   labels: string[];
 }
 
+const CANCEL_IN_FLIGHT_MS = 10_000;
+
 /** Wires client + store + tracker + pipeline for one console session. Framework-free. */
 export class ConsoleController {
   readonly tracker: IssueTracker;
@@ -52,7 +55,8 @@ export class ConsoleController {
   readonly summary: SessionSummaryCollector | undefined;
   private readonly getDictionary: () => Dictionary;
   private readonly now: () => number;
-  private readonly inFlightCancels = new Set<string>();
+  /** commandId -> the cancel request in flight. Entries expire so a lost request cannot skip a command forever. */
+  private readonly inFlightCancels = new Map<string, { reqId: string; at: number }>();
   private lastAckN: number;
   private readonly unsub: () => void;
 
@@ -75,7 +79,10 @@ export class ConsoleController {
       now: this.now,
     });
     this.lastAckN = o.store.getState().ackCounter;
-    this.unsub = o.store.subscribe((s) => this.pumpAcks(s.ackLog, s.ackCounter));
+    this.unsub = o.store.subscribe((s) => {
+      this.pumpAcks(s.ackLog, s.ackCounter);
+      this.pumpUnsent(s.unsent);
+    });
   }
 
   dispose(): void {
@@ -87,6 +94,13 @@ export class ConsoleController {
     if (counter === this.lastAckN) return;
     for (const a of log) if (a.n > this.lastAckN) this.tracker.handleAck(a);
     this.lastAckN = counter;
+  }
+
+  /** A cancel reported unsent never reached the server: let 직전 취소 target that command again. */
+  private pumpUnsent(unsent: UnsentCommand[] | undefined): void {
+    if (!unsent || unsent.length === 0 || this.inFlightCancels.size === 0) return;
+    const ids = new Set(unsent.map((u) => u.clientCmdId));
+    for (const [commandId, e] of this.inFlightCancels) if (ids.has(e.reqId)) this.inFlightCancels.delete(commandId);
   }
 
   private get parties(): Party[] {
@@ -122,22 +136,24 @@ export class ConsoleController {
   cancelCommand(commandId: string): string {
     const cmd = this.o.store.getState().commands[commandId];
     const label = cmd ? `${describeDraft(cmd, this.parties)} 취소` : '명령 취소';
-    this.inFlightCancels.add(commandId);
     this.metrics.cancelled('MANUAL');
-    return this.tracker.request({ type: 'command.cancel', commandId }, label, (ack) => {
+    const reqId = this.tracker.request({ type: 'command.cancel', commandId }, label, (ack) => {
       // Success: the cancel event removes it from the slots. Failure: allow trying again.
-      if (ack.error) this.inFlightCancels.delete(commandId);
+      if (ack.error && this.inFlightCancels.get(commandId)?.reqId === reqId) this.inFlightCancels.delete(commandId);
     });
+    this.inFlightCancels.set(commandId, { reqId, at: this.now() });
+    return reqId;
   }
 
   /** FR-F08-6. Repeated calls walk back, even before the previous cancel event has arrived. */
   cancelLast(): string | undefined {
     const s = this.o.store.getState();
-    for (const id of [...this.inFlightCancels]) {
+    const now = this.now();
+    for (const [id, e] of [...this.inFlightCancels]) {
       const c = s.commands[id];
-      if (!c || c.status === 'CANCELLED') this.inFlightCancels.delete(id);
+      if (!c || c.status === 'CANCELLED' || now - e.at > CANCEL_IN_FLIGHT_MS) this.inFlightCancels.delete(id);
     }
-    const last = findLastActive(s, this.inFlightCancels);
+    const last = findLastActive(s, new Set(this.inFlightCancels.keys()));
     return last ? this.cancelCommand(last.id) : undefined;
   }
 

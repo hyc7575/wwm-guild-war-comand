@@ -25,6 +25,8 @@ export interface CommandCardProps {
   pulsing?: boolean;
   struck?: boolean;
   restore?: RestoreKind | null;
+  /** Recognised text shown small under the card (only when the room shares transcripts). */
+  transcript?: string | null;
   /** data-testid of the card root. */
   testId?: string;
   /** Prefix of inner data-testids (`${p}-action`, ...). */
@@ -46,6 +48,7 @@ export function CommandCard({
   pulsing,
   struck,
   restore,
+  transcript,
   testId = 'my-party-card',
   idPrefix = 'my-card',
 }: CommandCardProps) {
@@ -129,6 +132,11 @@ export function CommandCard({
             <span aria-hidden="true"> · </span>
             <span data-changed={changed.target ? 'true' : undefined}>{targetText(command.target, parties)}</span>
           </div>
+          {transcript && (
+            <p className={styles.transcript} data-testid={`${idPrefix}-transcript`}>
+              “{transcript}”
+            </p>
+          )}
         </>
       ) : (
         <p className={styles.none}>대기 중인 명령 없음</p>

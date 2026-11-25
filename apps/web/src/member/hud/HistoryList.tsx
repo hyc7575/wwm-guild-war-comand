@@ -13,6 +13,8 @@ export interface HistoryListProps {
   onFilter(f: HistoryFilter): void;
   /** hide the "내 파티 관련만" option (no party chosen) */
   canFilterMine?: boolean;
+  /** room setting shareTranscript */
+  showTranscript?: boolean;
 }
 
 function summary(c: Command, parties: Party[]): string {
@@ -20,7 +22,7 @@ function summary(c: Command, parties: Party[]): string {
 }
 
 /** FR-F06-7/8. Presentational. */
-export function HistoryList({ parties, rows, commands, filter, onFilter, canFilterMine = true }: HistoryListProps) {
+export function HistoryList({ parties, rows, commands, filter, onFilter, canFilterMine = true, showTranscript = false }: HistoryListProps) {
   return (
     <div className={styles.wrap}>
       {canFilterMine && (
@@ -45,6 +47,11 @@ export function HistoryList({ parties, rows, commands, filter, onFilter, canFilt
                 <span className={styles.body} data-struck={c.status === 'CANCELLED' ? 'true' : undefined}>
                   {summary(c, parties)}
                 </span>
+                {showTranscript && c.transcript && (
+                  <span className={styles.transcript} data-testid="history-transcript">
+                    “{c.transcript}”
+                  </span>
+                )}
                 {c.repeatCount > 0 && <span className={styles.tag}>반복 {c.repeatCount}회</span>}
                 {c.status === 'CORRECTED' && (
                   <span className={styles.tag} data-kind="corrected">

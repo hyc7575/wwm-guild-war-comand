@@ -77,7 +77,7 @@ export default function CreateRoomPage() {
         expiresAt: res.expiresAt,
       });
       await saveLastConfig(finalDrafts);
-      navigate(`/c/${res.code}`);
+      navigate(`/c/${res.code}`, { state: { justCreated: true } });
     } catch (e) {
       setError(e instanceof Error ? e.message : '방을 만들지 못했습니다');
       setBusy(false);

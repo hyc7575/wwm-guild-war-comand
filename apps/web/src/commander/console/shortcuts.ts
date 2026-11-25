@@ -53,12 +53,18 @@ export function mapShortcut(e: KeyLike, ctx: { partyCount: number }): ShortcutAc
   return null;
 }
 
+const NON_TEXT_INPUT = new Set(['checkbox', 'radio', 'button', 'submit', 'reset', 'range']);
+
 /** True when the key event should be left to the focused element (typing) or an open dialog. */
 export function isTypingContext(target: EventTarget | null, doc: Document = document): boolean {
   const el = target as HTMLElement | null;
   if (el && el.tagName) {
     const tag = el.tagName;
-    if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || el.isContentEditable) return true;
+    if (tag === 'INPUT') {
+      // Switches, checkboxes, radios and buttons do not take text: shortcuts keep working.
+      const type = (el as HTMLInputElement).type;
+      if (!NON_TEXT_INPUT.has(type)) return true;
+    } else if (tag === 'TEXTAREA' || tag === 'SELECT' || el.isContentEditable) return true;
   }
   return doc.querySelector('[role="dialog"]') !== null;
 }

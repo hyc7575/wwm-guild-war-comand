@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { ActionIcon, Alert, Button, Group, Modal, Paper, Stack, Text, TextInput } from '@mantine/core';
 import { LIMITS } from '@winds/protocol';
 import { useRoomStore } from '../../state/roomStore';
@@ -29,13 +29,38 @@ export function PartyEditor({ opened, onClose }: { opened: boolean; onClose(): v
   );
 }
 
+const APPLY_TIMEOUT_MS = 10_000;
+
 function EditorBody({ onClose }: { onClose(): void }) {
   const c = useConsole();
   const [rows, setRows] = useState<EditorRow[]>(() => rowsFromParties(useRoomStore.getState().parties));
   const [message, setMessage] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [confirm, setConfirm] = useState<string | null>(null);
+  const pending = useRef<{ id: string; timer: ReturnType<typeof setTimeout> } | null>(null);
   const errors = validateRows(rows);
+
+  const settle = () => {
+    if (pending.current) clearTimeout(pending.current.timer);
+    pending.current = null;
+    setBusy(false);
+  };
+  const failUnsent = () => {
+    settle();
+    setMessage('서버에 전달되지 않았습니다. 연결을 확인하고 다시 적용하세요');
+  };
+
+  // The request was reported unsent (no ack after retries): stop waiting.
+  useEffect(() => {
+    const unsub = useRoomStore.subscribe((s) => {
+      const p = pending.current;
+      if (p && s.unsent.some((u) => u.clientCmdId === p.id)) failUnsent();
+    });
+    return () => {
+      unsub();
+      if (pending.current) clearTimeout(pending.current.timer);
+    };
+  }, []);
   const valid = rowsValid(rows);
 
   const apply = (confirmed: boolean) => {
@@ -60,8 +85,9 @@ function EditorBody({ onClose }: { onClose(): void }) {
     setBusy(true);
     setMessage(null);
     const payload = buildPartiesPayload(rows, s.parties);
-    c.updateParties(s.partyConfigVersion, payload, (ack) => {
-      setBusy(false);
+    if (pending.current) clearTimeout(pending.current.timer);
+    const id = c.updateParties(s.partyConfigVersion, payload, (ack) => {
+      settle();
       if (!ack.error) {
         void saveLastConfig(toLastConfig(payload));
         onClose();
@@ -72,6 +98,7 @@ function EditorBody({ onClose }: { onClose(): void }) {
         setMessage(`적용하지 못했습니다: ${errorText(ack.error)}`);
       }
     });
+    pending.current = { id, timer: setTimeout(failUnsent, APPLY_TIMEOUT_MS) };
   };
 
   return (

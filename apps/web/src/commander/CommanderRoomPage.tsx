@@ -1,4 +1,5 @@
-import { Link, useParams } from 'react-router';
+import { useEffect, useRef } from 'react';
+import { Link, useLocation, useNavigate, useParams } from 'react-router';
 import { Anchor, Stack, Text } from '@mantine/core';
 import { normalizeRoomCode } from '@winds/protocol';
 import { RoomSession } from '../net/RoomSession';
@@ -14,6 +15,14 @@ import { ClosedSummary } from './summary/ClosedSummary';
 export default function CommanderRoomPage() {
   const code = normalizeRoomCode(useParams().code ?? '');
   const tokens = loadRoomTokens(code);
+  const location = useLocation();
+  const navigate = useNavigate();
+  // FR-F01-2: arriving from /create opens the invite modal once (state is cleared so a reload does not reopen it).
+  const justCreated = useRef((location.state as { justCreated?: boolean } | null)?.justCreated === true).current;
+  useEffect(() => {
+    if (justCreated) navigate(location.pathname, { replace: true, state: null });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   if (!tokens.commanderToken) {
     return (
       <Stack p="md" maw={560} mx="auto" mt="xl">
@@ -28,12 +37,12 @@ export default function CommanderRoomPage() {
   }
   return (
     <RoomSession code={code} role="COMMANDER" token={tokens.commanderToken}>
-      <CommanderBody code={code} operatorToken={tokens.operatorToken} />
+      <CommanderBody code={code} operatorToken={tokens.operatorToken} openInvite={justCreated} />
     </RoomSession>
   );
 }
 
-function CommanderBody({ code, operatorToken }: { code: string; operatorToken?: string }) {
+function CommanderBody({ code, operatorToken, openInvite }: { code: string; operatorToken?: string; openInvite?: boolean }) {
   const connection = useRoomStore((s) => s.connection);
   return (
     <>
@@ -45,7 +54,7 @@ function CommanderBody({ code, operatorToken }: { code: string; operatorToken?: 
       )}
       <ConsoleProvider>
         <ClosedSummary />
-        <Console mode="commander" code={code} operatorToken={operatorToken} />
+        <Console mode="commander" code={code} operatorToken={operatorToken} openInvite={openInvite} />
       </ConsoleProvider>
       <NoticeToast />
     </>

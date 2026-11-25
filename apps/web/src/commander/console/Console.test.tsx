@@ -20,11 +20,11 @@ const cmd = (id: string, seq: number, partyIds: string[], action: Command['actio
   id, seq, target: { kind: 'PARTIES', partyIds }, action, status: 'ACTIVE', source: 'MANUAL', issuedAt: Date.now() - 5000, repeatCount: 0,
 });
 
-function mount(mode: 'commander' | 'operator' = 'commander') {
+function mount(mode: 'commander' | 'operator' = 'commander', openInvite = false) {
   return render(
     <MantineProvider forceColorScheme="dark">
       <ConsoleControllerProvider controller={controller}>
-        <Console mode={mode} code="K7M2QX" operatorToken="optok" />
+        <Console mode={mode} code="K7M2QX" operatorToken="optok" openInvite={openInvite} />
       </ConsoleControllerProvider>
     </MantineProvider>,
   );
@@ -204,6 +204,57 @@ describe('Console (commander)', () => {
     expect(sent[0]!.input).toEqual({ type: 'room.settings', settings: { targetlessAsAll: true } });
     fireEvent.click(tid('settings-share-transcript'));
     expect(sent[1]!.input).toEqual({ type: 'room.settings', settings: { shareTranscript: true } });
+  });
+
+  it('Esc still cancels after clicking the instant-publish switch', () => {
+    mount();
+    const sw = tid('console-instant-toggle');
+    fireEvent.click(sw);
+    fireEvent.keyDown(sw, { key: 'Escape', code: 'Escape' });
+    expect(sent.at(-1)!.input).toEqual({ type: 'command.cancel', commandId: 'B' });
+  });
+
+  it('ack panel shows Korean reasons for every error code', () => {
+    mount();
+    const codes: Record<string, string> = {
+      FORBIDDEN: '권한 없음', RATE_LIMITED: '요청이 너무 많음', INVALID_MESSAGE: '잘못된 요청', UNAUTHORIZED: '인증 실패',
+      UNKNOWN_COMMAND: '이미 사라진 명령', ROOM_NOT_FOUND: '방을 찾을 수 없음',
+    };
+    for (const [code, text] of Object.entries(codes)) {
+      act(() => {
+        const id = controller.issueManual({ target: { kind: 'ALL' }, action: 'HOLD' });
+        useRoomStore.getState().receive({ v: 1, type: 'ack', clientCmdId: id, error: code } as never);
+      });
+      expect(tid('ack-status')).toHaveTextContent(text);
+    }
+  });
+
+  it('shows store.lastError as a toast', () => {
+    mount();
+    act(() => useRoomStore.getState().receive({ v: 1, type: 'error', code: 'RATE_LIMITED', message: 'slow' } as never));
+    expect(tid('error-toast')).toHaveTextContent('요청이 너무 많음');
+  });
+
+  it('party editor stops waiting when the request is reported unsent', () => {
+    mount();
+    fireEvent.click(tid('party-editor-open'));
+    fireEvent.click(tid('party-editor-apply'));
+    const id = sent.at(-1)!.id;
+    expect(sent.at(-1)!.input.type).toBe('parties.update');
+    act(() => {
+      useRoomStore.setState({ unsent: [{ clientCmdId: id, createdAt: 0, reason: 'NO_ACK', msg: sent.at(-1)!.input }] });
+    });
+    expect(tid('party-editor-message')).toHaveTextContent('전달되지 않았습니다');
+    expect(tid('party-editor-apply')).not.toBeDisabled();
+  });
+
+  it('arriving from /create opens the invite modal; the 초대 링크 button reopens it', () => {
+    mount('commander', true);
+    expect(screen.getByRole('dialog')).toBeInTheDocument();
+    cleanup();
+    mount();
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(tid('invite-open')).toHaveTextContent('초대 링크');
   });
 
   it('close room needs confirmation', () => {

@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import type { Party } from '@winds/protocol';
+import { useRoomStore } from '../../state/roomStore';
 import { NoticeToast } from '../../shared/NoticeToast';
 import { CommandCard } from './CommandCard';
 import { AllLine } from './AllLine';
@@ -39,6 +40,7 @@ function useAudioBlocked(enabled: boolean): boolean {
 
 export function MemberHud({ onChangeParty }: { onChangeParty(): void }) {
   const m = useMemberHudModel();
+  const shareTranscript = useRoomStore((s) => s.settings.shareTranscript);
   const { settings, update } = useHudSettings();
   const now = useNow(1000);
   const wide = useMediaQuery('(min-width: 900px)');
@@ -130,6 +132,7 @@ export function MemberHud({ onChangeParty }: { onChangeParty(): void }) {
                 pulsing={fx.pulsing}
                 struck={!!fx.struckCommand}
                 restore={fx.restore}
+                transcript={shareTranscript ? shownCommand?.transcript : null}
               />
             </div>
           )}
@@ -163,6 +166,7 @@ export function MemberHud({ onChangeParty }: { onChangeParty(): void }) {
                 filter={m.historyFilter}
                 onFilter={m.setHistoryFilter}
                 canFilterMine={!unselected}
+                showTranscript={shareTranscript}
               />
             )}
           </section>

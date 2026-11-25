@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react';
 import { Alert, Button, Group, Loader, Paper, Stack, Text } from '@mantine/core';
 import { useRoomStore } from '../../state/roomStore';
 import { NOTE_TEXT, errorText } from '../labels';
@@ -82,5 +83,25 @@ export function UnsentList() {
         ))}
       </Stack>
     </Paper>
+  );
+}
+
+/** Server `error` messages that carry no clientCmdId (store.lastError) as a short toast. */
+export function ErrorToast() {
+  const lastError = useRoomStore((s) => s.lastError);
+  const [shown, setShown] = useState<typeof lastError>(null);
+  useEffect(() => {
+    if (!lastError) return;
+    setShown(lastError);
+    const t = setTimeout(() => setShown(null), TOAST_MS);
+    return () => clearTimeout(t);
+  }, [lastError]);
+  if (!shown) return null;
+  return (
+    <div className={styles.toasts} role="alert">
+      <Alert color="red" data-testid="error-toast">
+        {errorText(shown.code)}
+      </Alert>
+    </div>
   );
 }

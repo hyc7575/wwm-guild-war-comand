@@ -489,3 +489,21 @@ describe('settings', () => {
     expect(useHudSettings.getState().settings).toMatchObject({ soundOn: false, fontStep: 2 });
   });
 });
+
+describe('shareTranscript', () => {
+  const withSetting = (on: boolean) => {
+    useRoomStore.setState((st) => ({ settings: { ...st.settings, shareTranscript: on } }));
+  };
+  it('shows the transcript under the card and in history only when shared', () => {
+    setup();
+    const mine = cmd('m', { target: toParties('p3'), action: 'DEFEND', transcript: '3파티 오른쪽 지켜' });
+    welcome([mine], { p1: [], p2: [], p3: ['m'], p4: [] });
+    withSetting(true);
+    render(<MemberHud onChangeParty={() => undefined} />);
+    expect(screen.getByTestId('my-card-transcript')).toHaveTextContent('“3파티 오른쪽 지켜”');
+    cleanup();
+    withSetting(false);
+    render(<MemberHud onChangeParty={() => undefined} />);
+    expect(screen.queryByTestId('my-card-transcript')).toBeNull();
+  });
+});

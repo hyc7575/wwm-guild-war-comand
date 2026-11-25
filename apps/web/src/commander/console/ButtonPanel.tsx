@@ -144,7 +144,10 @@ export function ButtonPanel({ state, dispatch, locations, instant, onInstantChan
           size="sm"
           label="행동 누르면 바로 발행 (위치 없는 후퇴·대기용)"
           checked={instant}
-          onChange={(e) => onInstantChange(e.currentTarget.checked)}
+          onChange={(e) => {
+            onInstantChange(e.currentTarget.checked);
+            e.currentTarget.blur();
+          }}
           data-testid="console-instant-toggle"
         />
       </Stack>
